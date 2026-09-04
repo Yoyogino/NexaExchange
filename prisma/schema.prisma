@@ -29,16 +29,6 @@ enum LedgerDirection {
   CREDIT
 }
 
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  role      UserRole @default(TRADER)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  ledgerAccounts LedgerAccount[]
-  auditEvents    AuditEvent[]
-}
 
 // NOTE: this Prisma schema documents the intended production data model
 // (PRODUCT_REQUIREMENTS.md section 7). The running demo server currently
@@ -92,4 +82,86 @@ model AuditEvent {
   createdAt   DateTime @default(now())
 }
 
-// Order, Trade, and Market models arrive with the matching-engine milestone.
+enum OrderSide {
+  BUY
+  SELL
+}
+
+enum OrderStatus {
+  PENDING
+  PARTIALLY_FILLED
+  FILLED
+  CANCELLED
+}
+
+enum OrderType {
+  LIMIT
+  MARKET
+}
+
+model Market {
+  id            String   @id @default(cuid())
+  baseCurrency  String   // e.g. "BTC"
+  quoteCurrency String   // e.g. "USDT"
+  symbol        String   @unique // e.g. "BTC/USDT"
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  orders Order[]
+  trades Trade[]
+
+  @@index([isActive])
+}
+
+model Order {
+  id            String      @id @default(cuid())
+  userId        String
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  marketId      String
+  market        Market      @relation(fields: [marketId], references: [id])
+  side          OrderSide
+  type          OrderType
+  price         Decimal?    @db.Decimal(28, 8) // NULL for market orders
+  quantity      Decimal     @db.Decimal(28, 8)
+  filledAmount  Decimal     @db.Decimal(28, 8) @default(0)
+  status        OrderStatus @default(PENDING)
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  trades Trade[]
+
+  @@index([userId])
+  @@index([marketId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Trade {
+  id         String   @id @default(cuid())
+  orderId    String
+  order      Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  marketId   String
+  market     Market   @relation(fields: [marketId], references: [id])
+  counterOrderId String? // Matching order (if any)
+  price      Decimal  @db.Decimal(28, 8)
+  quantity   Decimal  @db.Decimal(28, 8)
+  fee        Decimal  @db.Decimal(28, 8)
+  createdAt  DateTime @default(now())
+
+  @@index([orderId])
+  @@index([marketId])
+  @@index([createdAt])
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  role      UserRole @default(TRADER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ledgerAccounts LedgerAccount[]
+  auditEvents    AuditEvent[]
+  orders         Order[]
+}
