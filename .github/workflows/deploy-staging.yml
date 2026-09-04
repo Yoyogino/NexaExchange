@@ -31,7 +31,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://exchange:exchange_dev_password@localhost:5432/exchange_demo
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
           node-version: 24
@@ -53,7 +53,7 @@ jobs:
       STAGING_USER: ${{ secrets.STAGING_USER }}
       STAGING_ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
       - name: Configure verified SSH access
         env:
           SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
