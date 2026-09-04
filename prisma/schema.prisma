@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  TRADER
+  ADMIN
+}
+
+enum Asset {
+  BTC
+  USDT
+}
+
+enum LedgerAccountType {
+  AVAILABLE
+  LOCKED
+  SYSTEM_ISSUANCE
+  FEE
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  role      UserRole @default(TRADER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  ledgerAccounts LedgerAccount[]
+  auditEvents    AuditEvent[]
+}
+
+// NOTE: this Prisma schema documents the intended production data model
+// (PRODUCT_REQUIREMENTS.md section 7). The running demo server currently
+// bootstraps and queries the same shape with raw SQL (server/ledger.mjs)
+// rather than Prisma Migrate — adopting Prisma Migrate is a follow-up task,
+// not done yet. Keep these two in sync by hand until then.
+
+// A ledger account is never a mutable balance column — its balance is
+// always derived by summing LedgerEntry rows. System accounts (e.g.
+// SYSTEM_ISSUANCE) have userId = null and are singletons per (asset, type).
+model LedgerAccount {
+  id          String            @id @default(cuid())
+  userId      String?
+  user        User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  asset       Asset
+  accountType LedgerAccountType
+  createdAt   DateTime          @default(now())
+  entries     LedgerEntry[]
+
+  @@unique([userId, asset, accountType])
+}
+
+// One row per debit or credit. Entries sharing a groupId must sum to zero
+// per asset — that invariant is enforced in code (server/ledger.mjs),
+// checked before any row is written.
+model LedgerEntry {
+  id              String          @id @default(cuid())
+  groupId         String
+  ledgerAccountId String
+  ledgerAccount   LedgerAccount   @relation(fields: [ledgerAccountId], references: [id])
+  direction       LedgerDirection
+  amount          Decimal         @db.Decimal(28, 8)
+  reason          String
+  relatedType     String?
+  relatedId       String?
+  createdAt       DateTime        @default(now())
+
+  @@index([ledgerAccountId])
+  @@index([groupId])
+}
+
+// Immutable, append-only record of security- and admin-relevant events.
+model AuditEvent {
+  id          String   @id @default(cuid())
+  actorUserId String?
+  actorUser   User?    @relation(fields: [actorUserId], references: [id])
+  action      String
+  targetType  String?
+  targetId    String?
+  metadata    Json?
+  createdAt   DateTime @default(now())
+}
+
+// Order, Trade, and Market models arrive with the matching-engine milestone.

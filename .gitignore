@@ -1,0 +1,11 @@
+node_modules/
+.next/
+.env
+.env.local
+!.env.example
+coverage/
+backups/
+.local-secrets/
+*.log
+
+.env.staging

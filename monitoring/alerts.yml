@@ -1,0 +1,31 @@
+groups:
+  - name: nexa-exchange
+    rules:
+      - alert: NexaExchangeDown
+        expr: up{job="nexa-exchange"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Nexa Exchange cannot be scraped
+      - alert: NexaDependencyUnavailable
+        expr: nexa_dependency_up == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Nexa Exchange dependency is unavailable
+      - alert: NexaHighServerErrorRate
+        expr: rate(nexa_http_errors_total[5m]) / clamp_min(rate(nexa_http_requests_total[5m]), 0.001) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Nexa Exchange server error rate exceeds 5%
+      - alert: NexaHighAverageLatency
+        expr: rate(nexa_http_request_duration_milliseconds_total[5m]) / clamp_min(rate(nexa_http_requests_total[5m]), 0.001) > 1000
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Nexa Exchange average response time exceeds one second

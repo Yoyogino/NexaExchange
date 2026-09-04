@@ -1,0 +1,42 @@
+{
+  "name": "crypto-exchange-demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "dev:api": "node --env-file=.env server/index.mjs",
+    "dev:all": "node server/dev-all.mjs",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node --env-file=.env server/test-runner.mjs",
+    "test:ledger": "node --env-file=.env server/test-runner.mjs",
+    "backup": "powershell -ExecutionPolicy Bypass -File scripts/backup.ps1",
+    "verify:backup": "powershell -ExecutionPolicy Bypass -File scripts/verify-backup.ps1",
+    "promote-admin": "node --env-file=.env server/scripts/promote-admin.mjs",
+    "backup:encrypted": "powershell -ExecutionPolicy Bypass -File scripts/backup-encrypted.ps1",
+    "validate:staging-env": "node --env-file=.env.staging scripts/validate-staging-env.mjs",
+    "validate:staging": "node --env-file=.env.staging scripts/validate-staging-env.mjs && node --env-file=.env.staging scripts/wait-for-staging.mjs && node --env-file=.env.staging scripts/validate-staging.mjs && node --env-file=.env.staging scripts/staging-smoke.mjs",
+    "wait:staging": "node --env-file=.env.staging scripts/wait-for-staging.mjs",
+    "smoke:staging": "node --env-file=.env.staging scripts/staging-smoke.mjs",
+    "load-test": "node scripts/load-test.mjs"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.23.0",
+    "react": "latest",
+    "react-dom": "latest",
+    "redis": "^6.2.1"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.6",
+    "@types/node": "latest",
+    "@types/pg": "^8.23.1",
+    "@types/react": "latest",
+    "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "latest",
+    "typescript": "latest",
+    "vite": "latest"
+  }
+}

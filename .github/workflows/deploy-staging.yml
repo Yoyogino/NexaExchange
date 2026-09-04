@@ -1,0 +1,87 @@
+name: Deploy simulated exchange to staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-deployment
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: exchange_demo
+          POSTGRES_USER: exchange
+          POSTGRES_PASSWORD: exchange_dev_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U exchange -d exchange_demo"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://exchange:exchange_dev_password@localhost:5432/exchange_demo
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm audit --omit=dev --audit-level=high
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: docker compose --env-file .env.staging.example -f compose.staging.yml config --quiet
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    env:
+      STAGING_HOST: ${{ secrets.STAGING_HOST }}
+      STAGING_USER: ${{ secrets.STAGING_USER }}
+      STAGING_ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Configure verified SSH access
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Transfer release files
+        run: |
+          tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.env --exclude=.local-secrets --exclude=backups -czf - . \
+            | ssh "$STAGING_USER@$STAGING_HOST" 'mkdir -p ~/nexa-exchange-staging && tar -xzf - -C ~/nexa-exchange-staging'
+      - name: Install protected staging environment
+        run: |
+          printf '%s' "$STAGING_ENV_FILE" | base64 -w0 \
+            | ssh "$STAGING_USER@$STAGING_HOST" 'base64 -d > ~/nexa-exchange-staging/.env.staging && chmod 600 ~/nexa-exchange-staging/.env.staging'
+          printf '%s' "$STAGING_ENV_FILE" > .env.staging
+          node --env-file=.env.staging scripts/validate-staging-env.mjs
+          rm .env.staging
+      - name: Deploy and verify readiness
+        run: |
+          ssh "$STAGING_USER@$STAGING_HOST" 'cd ~/nexa-exchange-staging && docker compose --env-file .env.staging -f compose.staging.yml config --quiet && docker compose --env-file .env.staging -f compose.staging.yml up -d --build --remove-orphans'
+          sleep 10
+          ssh "$STAGING_USER@$STAGING_HOST" 'cd ~/nexa-exchange-staging && docker compose --env-file .env.staging -f compose.staging.yml exec -T app wget --no-verbose --tries=10 --retry-connrefused --spider http://127.0.0.1:3001/api/ready'
+      - name: Run public staging validation and account smoke test
+        run: |
+          trap 'rm -f .env.staging' EXIT
+          printf '%s' "$STAGING_ENV_FILE" > .env.staging
+          npm run validate:staging

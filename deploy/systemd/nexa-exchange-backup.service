@@ -1,0 +1,8 @@
+[Unit]
+Description=Nexa simulated exchange encrypted staging backup
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/nexa-exchange-staging
+ExecStart=/usr/bin/docker compose --env-file .env.staging -f compose.staging.yml --profile operations run --rm backup
