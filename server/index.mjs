@@ -34,6 +34,9 @@ import { createCodeHasher } from "./code-hash.mjs";
 import { CursorError } from "./cursor-pagination.mjs";
 import { consumeEmailVerificationToken, consumeRecoveryCode, issueEmailVerificationToken, issuePasswordResetToken } from "./auth-tokens.mjs";
 import { assertRestrictedRuntimePrivileges } from "./runtime-privileges.mjs";
+import { ensureAdvancedOrdersSchema } from "./advanced-orders.mjs";
+import { createAdvancedOrdersRouter } from "./advanced-orders-api.mjs";
+import { startMonitoring } from "./monitor-service.mjs";
 
 assertProxyConfiguration();
 assertMonitoringConfiguration();
@@ -409,6 +412,9 @@ app.get("/api/trades", requireSession, async (req, res, next) => {
 
 app.use("/api/admin", requireSession, (req, res, next) => ["GET", "HEAD", "OPTIONS"].includes(req.method) ? next() : requireCsrf(req, res, next), createAdminRouter(pool, { redis, metrics, events }));
 
+// Phase 5: stop-loss / take-profit / trailing-stop / order-chain endpoints.
+app.use("/api", requireSession, (req, res, next) => ["GET", "HEAD", "OPTIONS"].includes(req.method) ? next() : requireCsrf(req, res, next), createAdvancedOrdersRouter(pool));
+
 if (process.env.NODE_ENV === "production") {
   const clientDirectory = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../dist");
   app.use(express.static(clientDirectory, { index: false, maxAge: "1h" }));
@@ -424,7 +430,9 @@ app.use((error, _req, res, _next) => {
 });
 
 if (process.env.RUN_MIGRATIONS !== "0") await initializeApplicationSchema(pool, encryptionKey);
+if (process.env.RUN_MIGRATIONS !== "0") await ensureAdvancedOrdersSchema(pool);
 await loadBook(pool);
+startMonitoring(pool, { events });
 await redis.connect();
 await eventRedis.connect();
 events.setFanout(({ event, userIds }) => redis.publish(EVENT_CHANNEL, JSON.stringify({ origin: instanceId, event, userIds })));

@@ -1,297 +1,99 @@
-// server/monitor-service.mjs
-// Phase 5: Background service to monitor and execute advanced orders
+// Phase 5: background monitor that polls the market price and triggers
+// stop-loss / take-profit / trailing-stop orders.
+//
+// Runs on a simple setInterval, serialized so a slow tick can never overlap
+// the next one. Every trigger is executed through matching.mjs's
+// `placeOrder` (see advanced-orders.mjs), so it gets the exact same
+// locking/settlement/ledger guarantees as a user-submitted order — this
+// service never writes to the ledger or order book directly.
 
-import { db } from './db.mjs';
-import * as advOrders from './advanced-orders.mjs';
-import * as trailingStops from './trailing-stops.mjs';
-import Decimal from 'decimal.js';
-import pino from 'pino';
+import { getMarketSnapshot, getRecentMarketTrades } from "./matching.mjs";
+import { executeAdvancedOrder, getActiveAdvancedOrders, shouldTriggerStopLoss, shouldTriggerTakeProfit } from "./advanced-orders.mjs";
+import { shouldTriggerTrailingStop, updateTrailingStop } from "./trailing-stops.mjs";
 
-const logger = pino({ level: process.env.LOG_LEVEL || 'info' });
+const DEFAULT_INTERVAL_MS = 1000;
 
-/**
- * Monitor Service
- * Polls database every second for orders that should be triggered
- * Handles stop-loss, take-profit, and trailing stop execution
- */
+let timer = null;
+let running = false;
+let lastTickAt = null;
+let lastError = null;
+let totalTicks = 0;
+let totalTriggered = 0;
 
-class OrderMonitorService {
-  constructor(options = {}) {
-    this.pollInterval = options.pollInterval || 1000; // 1 second
-    this.maxConcurrentChecks = options.maxConcurrentChecks || 50;
-    this.isRunning = false;
-    this.lastPollTime = null;
-    this.processedCount = 0;
-    this.triggeredCount = 0;
-    this.checkMarkets = options.checkMarkets || [];
-  }
+function log(event, fields = {}) {
+  console.log(JSON.stringify({ event, ...fields }));
+}
 
-  /**
-   * Start the monitor service
-   */
-  start() {
-    if (this.isRunning) {
-      logger.warn('Monitor service already running');
-      return;
-    }
+/** Best current reference price for evaluating triggers: best bid (what a SELL would fill against), falling back to the last traded price. */
+async function currentReferencePrice(pool) {
+  const snapshot = getMarketSnapshot();
+  if (snapshot.bestBid) return snapshot.bestBid;
+  const recent = await getRecentMarketTrades(pool, 1);
+  return recent[0]?.price ?? null;
+}
 
-    this.isRunning = true;
-    logger.info('Order monitor service started');
+async function tick(pool, events) {
+  if (running) return; // never overlap ticks
+  running = true;
+  try {
+    const price = await currentReferencePrice(pool);
+    totalTicks += 1;
+    lastTickAt = new Date();
+    if (price === null) return; // no price yet (empty book, no trades) — nothing to check
 
-    // Start polling
-    this.poll();
-  }
-
-  /**
-   * Stop the monitor service
-   */
-  stop() {
-    this.isRunning = false;
-    logger.info('Order monitor service stopped');
-  }
-
-  /**
-   * Main polling loop
-   */
-  async poll() {
-    while (this.isRunning) {
+    const orders = await getActiveAdvancedOrders(pool);
+    const affectedUserIds = new Set();
+    for (const order of orders) {
       try {
-        this.lastPollTime = new Date();
-        await this.checkAllOrders();
-      } catch (err) {
-        logger.error({ err }, 'Error in monitor poll cycle');
-      }
-
-      // Wait for next poll interval
-      await new Promise(resolve => setTimeout(resolve, this.pollInterval));
-    }
-  }
-
-  /**
-   * Check all active orders for triggers
-   */
-  async checkAllOrders() {
-    try {
-      // Get all active orders
-      const result = await db.query(
-        `SELECT ao.*, m.id as market_id, m.symbol 
-         FROM advanced_orders ao
-         JOIN markets m ON ao.market_id = m.id
-         WHERE ao.status = 'ACTIVE'
-         ORDER BY ao.created_at ASC
-         LIMIT $1`,
-        [this.maxConcurrentChecks]
-      );
-
-      const orders = result.rows;
-      this.processedCount += orders.length;
-
-      // Check each order
-      for (const order of orders) {
-        try {
-          await this.checkOrder(order);
-        } catch (err) {
-          logger.error(
-            { orderId: order.id, err },
-            'Error checking order'
-          );
+        let current = order;
+        let triggered = false;
+        if (order.order_type === "TRAILING_STOP") {
+          current = await updateTrailingStop(pool, order, price);
+          triggered = shouldTriggerTrailingStop(current, price);
+        } else if (order.order_type === "STOP_LOSS") {
+          triggered = shouldTriggerStopLoss(current, price);
+        } else if (order.order_type === "TAKE_PROFIT") {
+          triggered = shouldTriggerTakeProfit(current, price);
         }
-      }
-
-      // Log stats every 10 seconds
-      if (Math.random() < 0.1) {
-        logger.debug(
-          { processed: this.processedCount, triggered: this.triggeredCount },
-          'Monitor service stats'
-        );
-      }
-    } catch (err) {
-      logger.error({ err }, 'Error in checkAllOrders');
-    }
-  }
-
-  /**
-   * Check if a single order should be triggered
-   */
-  async checkOrder(order) {
-    // Get current market price
-    const price = await this.getCurrentMarketPrice(order.market_id);
-    if (!price) {
-      return; // Price data unavailable
-    }
-
-    let shouldTrigger = false;
-    let triggerFunc = null;
-
-    // Determine which type of order and check trigger condition
-    switch (order.order_type) {
-      case 'STOP_LOSS':
-        shouldTrigger = advOrders.shouldTriggerStopLoss(order, price);
-        triggerFunc = () => advOrders.executeStopLoss(order.id, price);
-        break;
-
-      case 'TAKE_PROFIT':
-        shouldTrigger = advOrders.shouldTriggerTakeProfit(order, price);
-        triggerFunc = () => advOrders.executeTakeProfit(order.id, price);
-        break;
-
-      case 'TRAILING_STOP':
-        // Update trailing stop trigger first
-        await trailingStops.updateTrailingStopTrigger(order, price);
-
-        // Check if should trigger
-        shouldTrigger = trailingStops.shouldTriggerTrailingStop(order, price);
-        triggerFunc = () => trailingStops.executeTrailingStop(order.id, price);
-        break;
-
-      default:
-        logger.warn({ orderType: order.order_type }, 'Unknown order type');
-        return;
-    }
-
-    // Execute if triggered
-    if (shouldTrigger) {
-      try {
-        await triggerFunc();
-        this.triggeredCount++;
-
-        logger.info(
-          {
-            orderId: order.id,
-            orderType: order.order_type,
-            symbol: order.symbol,
-            triggerPrice: order.trigger_value,
-            fillPrice: price
-          },
-          'Order triggered and executed'
-        );
-
-        // Handle order chain cascade if applicable
-        const chains = await db.query(
-          `SELECT * FROM order_chains 
-           WHERE (stop_loss_id = $1 OR take_profit_id = $1 OR trailing_stop_id = $1)
-           AND status = 'ACTIVE'`,
-          [order.id]
-        );
-
-        for (const chain of chains.rows) {
-          try {
-            await advOrders.handleOrderChainTrigger(chain.id, order.id);
-            logger.info(
-              { chainId: chain.id, triggeredOrderId: order.id },
-              'Order chain cascade executed'
-            );
-          } catch (err) {
-            logger.error(
-              { chainId: chain.id, err },
-              'Error handling order chain cascade'
-            );
-          }
-        }
-      } catch (err) {
-        logger.error(
-          { orderId: order.id, err },
-          'Error executing triggered order'
-        );
+        if (!triggered) continue;
+        const { advancedOrder, placedOrder } = await executeAdvancedOrder(pool, current);
+        totalTriggered += 1;
+        affectedUserIds.add(order.user_id);
+        for (const uid of placedOrder.affectedUserIds ?? []) affectedUserIds.add(uid);
+        log("advanced_order_triggered", { orderId: advancedOrder.id, orderType: advancedOrder.order_type, userId: order.user_id, fillPrice: advancedOrder.fill_price });
+      } catch (error) {
+        log("advanced_order_execution_failed", { orderId: order.id, message: error.message });
       }
     }
-  }
-
-  /**
-   * Get current market price
-   * Uses cache if available, falls back to database
-   */
-  async getCurrentMarketPrice(marketId) {
-    try {
-      // Try to get latest trade price
-      const result = await db.query(
-        `SELECT price FROM trades 
-         WHERE market_id = $1 AND status = 'FILLED'
-         ORDER BY created_at DESC
-         LIMIT 1`,
-        [marketId]
-      );
-
-      if (result.rows.length > 0) {
-        return new Decimal(result.rows[0].price);
-      }
-
-      return null;
-    } catch (err) {
-      logger.error({ marketId, err }, 'Error getting market price');
-      return null;
+    if (events && affectedUserIds.size) {
+      events.publish("market");
+      events.publish("account", [...affectedUserIds]);
     }
-  }
-
-  /**
-   * Get monitor service status
-   */
-  getStatus() {
-    return {
-      isRunning: this.isRunning,
-      pollInterval: this.pollInterval,
-      maxConcurrentChecks: this.maxConcurrentChecks,
-      lastPollTime: this.lastPollTime,
-      processedCount: this.processedCount,
-      triggeredCount: this.triggeredCount,
-      uptime: this.isRunning ? Date.now() - this.startTime : null
-    };
-  }
-
-  /**
-   * Reset statistics
-   */
-  resetStats() {
-    this.processedCount = 0;
-    this.triggeredCount = 0;
-    this.startTime = Date.now();
+    lastError = null;
+  } catch (error) {
+    lastError = error.message;
+    log("monitor_tick_failed", { message: error.message });
+  } finally {
+    running = false;
   }
 }
 
-// Export singleton instance
-let monitorInstance = null;
-
-/**
- * Get or create monitor service instance
- */
-export function getMonitorService(options = {}) {
-  if (!monitorInstance) {
-    monitorInstance = new OrderMonitorService(options);
-  }
-  return monitorInstance;
+export function startMonitoring(pool, { events = null, intervalMs = DEFAULT_INTERVAL_MS } = {}) {
+  if (timer) return;
+  timer = setInterval(() => {
+    tick(pool, events);
+  }, intervalMs);
+  if (typeof timer.unref === "function") timer.unref();
+  log("monitor_started", { intervalMs });
 }
 
-/**
- * Start monitoring orders
- */
-export function startMonitoring(options = {}) {
-  const monitor = getMonitorService(options);
-  if (!monitor.isRunning) {
-    monitor.start();
-  }
-  return monitor;
-}
-
-/**
- * Stop monitoring orders
- */
 export function stopMonitoring() {
-  if (monitorInstance) {
-    monitorInstance.stop();
-  }
+  if (!timer) return;
+  clearInterval(timer);
+  timer = null;
+  log("monitor_stopped", {});
 }
 
-/**
- * Get monitor status
- */
 export function getMonitorStatus() {
-  if (!monitorInstance) {
-    return {
-      isRunning: false,
-      message: 'Monitor service not initialized'
-    };
-  }
-  return monitorInstance.getStatus();
+  return { running: timer !== null, lastTickAt, lastError, totalTicks, totalTriggered };
 }
-
-export default OrderMonitorService;

@@ -1,408 +1,245 @@
-// server/advanced-orders.mjs
-// Phase 5: Stop-Loss, Take-Profit, and Trailing Stop Orders
+// Phase 5: Stop-Loss, Take-Profit orders, and order chains (OCO).
+//
+// These are "conditional" orders: they don't touch the order book or lock
+// funds themselves. They sit in `advanced_orders` until the monitor service
+// (see monitor-service.mjs) observes a matching market price, at which point
+// they're executed as an ordinary MARKET order through matching.mjs's
+// `placeOrder` — the same locking, settlement, and ledger guarantees as any
+// other order apply, so this module never touches the ledger directly.
+//
+// This app is a single-market demo (matching.MARKET_ID, "BTC-USDT"), so
+// advanced orders don't reference a `markets` table the way a multi-market
+// exchange would; they're always against that one market.
 
-import { db } from './db.mjs';
-import { v4 as uuidv4 } from 'uuid';
-import Decimal from 'decimal.js';
+import crypto from "node:crypto";
+import * as D from "./decimal.mjs";
+import { MARKET_ID, OrderError, placeOrder } from "./matching.mjs";
 
-/**
- * Advanced Orders Module
- * Handles stop-loss, take-profit, and trailing stop order logic
- */
-
-// ============================================================================
-// STOP-LOSS ORDERS
-// ============================================================================
-
-/**
- * Create a stop-loss order
- * @param {string} userId - User ID
- * @param {string} marketId - Market ID  
- * @param {number} triggerPrice - Price at which to trigger the order
- * @param {number} quantity - Quantity to sell
- * @param {string} notes - Optional notes
- * @returns {object} Created advanced order
- */
-export async function createStopLossOrder(userId, marketId, triggerPrice, quantity, notes = '') {
-  const orderId = uuidv4();
-  
-  const result = await db.query(
-    `INSERT INTO advanced_orders 
-     (id, user_id, market_id, order_type, order_side, trigger_type, trigger_value, quantity, notes, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     RETURNING *`,
-    [orderId, userId, marketId, 'STOP_LOSS', 'SELL', 'PRICE', triggerPrice, quantity, notes, 'ACTIVE']
-  );
-  
-  return result.rows[0];
-}
-
-/**
- * Check if a stop-loss order should be triggered
- * @param {object} advancedOrder - Advanced order object
- * @param {number} currentPrice - Current market price
- * @returns {boolean} True if order should trigger
- */
-export function shouldTriggerStopLoss(advancedOrder, currentPrice) {
-  // Stop-loss triggers when price falls to or below trigger price
-  const current = new Decimal(currentPrice);
-  const trigger = new Decimal(advancedOrder.trigger_value);
-  return current.lessThanOrEqualTo(trigger);
-}
-
-/**
- * Execute a stop-loss order (create matching market order)
- * @param {string} orderId - Advanced order ID
- * @param {number} fillPrice - Price at which order was filled
- * @returns {object} Result of execution
- */
-export async function executeStopLoss(orderId, fillPrice) {
-  const order = await db.query(
-    'SELECT * FROM advanced_orders WHERE id = $1',
-    [orderId]
-  );
-  
-  if (!order.rows.length) {
-    throw new Error('Advanced order not found');
-  }
-  
-  const advOrder = order.rows[0];
-  
-  // Update advanced order status
-  await db.query(
-    `UPDATE advanced_orders 
-     SET status = $1, triggered_price = $2, triggered_at = $3, fill_price = $4, filled_quantity = $5, filled_at = $6
-     WHERE id = $7`,
-    ['FILLED', fillPrice, new Date(), fillPrice, advOrder.quantity, new Date(), orderId]
-  );
-  
-  // Create ledger entry for the stop-loss execution
-  const ledgerId = uuidv4();
-  await db.query(
-    `INSERT INTO ledger_entries 
-     (id, user_id, asset_id, entry_type, quantity, price, fee, notes, advanced_order_id, created_at)
-     SELECT $1, $2, a.id, $3, $4, $5, $6, $7, $8, NOW()
-     FROM assets a
-     JOIN markets m ON m.quote_asset_id = a.id
-     WHERE m.id = $9`,
-    [ledgerId, advOrder.user_id, 'TRADE', advOrder.quantity, fillPrice, 0, 'Stop-Loss Triggered', orderId, advOrder.market_id]
-  );
-  
-  return {
-    success: true,
-    orderId,
-    fillPrice,
-    quantity: advOrder.quantity,
-    timestamp: new Date()
-  };
-}
-
-/**
- * Cancel a stop-loss order
- * @param {string} orderId - Advanced order ID
- * @returns {object} Canceled order
- */
-export async function cancelStopLoss(orderId) {
-  const result = await db.query(
-    `UPDATE advanced_orders 
-     SET status = $1, updated_at = NOW()
-     WHERE id = $2 AND status = 'ACTIVE'
-     RETURNING *`,
-    ['CANCELED', orderId]
-  );
-  
-  if (!result.rows.length) {
-    throw new Error('Cannot cancel: order not found or not active');
-  }
-  
-  return result.rows[0];
-}
-
-// ============================================================================
-// TAKE-PROFIT ORDERS
-// ============================================================================
-
-/**
- * Create a take-profit order
- * @param {string} userId - User ID
- * @param {string} marketId - Market ID
- * @param {number} triggerPrice - Price at which to trigger the order
- * @param {number} quantity - Quantity to sell
- * @param {string} notes - Optional notes
- * @returns {object} Created advanced order
- */
-export async function createTakeProfitOrder(userId, marketId, triggerPrice, quantity, notes = '') {
-  const orderId = uuidv4();
-  
-  const result = await db.query(
-    `INSERT INTO advanced_orders 
-     (id, user_id, market_id, order_type, order_side, trigger_type, trigger_value, quantity, notes, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-     RETURNING *`,
-    [orderId, userId, marketId, 'TAKE_PROFIT', 'SELL', 'PRICE', triggerPrice, quantity, notes, 'ACTIVE']
-  );
-  
-  return result.rows[0];
-}
-
-/**
- * Check if a take-profit order should be triggered
- * @param {object} advancedOrder - Advanced order object
- * @param {number} currentPrice - Current market price
- * @returns {boolean} True if order should trigger
- */
-export function shouldTriggerTakeProfit(advancedOrder, currentPrice) {
-  // Take-profit triggers when price rises to or above trigger price
-  const current = new Decimal(currentPrice);
-  const trigger = new Decimal(advancedOrder.trigger_value);
-  return current.greaterThanOrEqualTo(trigger);
-}
-
-/**
- * Execute a take-profit order
- * @param {string} orderId - Advanced order ID
- * @param {number} fillPrice - Price at which order was filled
- * @returns {object} Result of execution
- */
-export async function executeTakeProfit(orderId, fillPrice) {
-  const order = await db.query(
-    'SELECT * FROM advanced_orders WHERE id = $1',
-    [orderId]
-  );
-  
-  if (!order.rows.length) {
-    throw new Error('Advanced order not found');
-  }
-  
-  const advOrder = order.rows[0];
-  
-  // Update advanced order status
-  await db.query(
-    `UPDATE advanced_orders 
-     SET status = $1, triggered_price = $2, triggered_at = $3, fill_price = $4, filled_quantity = $5, filled_at = $6
-     WHERE id = $7`,
-    ['FILLED', fillPrice, new Date(), fillPrice, advOrder.quantity, new Date(), orderId]
-  );
-  
-  // Create ledger entry for the take-profit execution
-  const ledgerId = uuidv4();
-  await db.query(
-    `INSERT INTO ledger_entries 
-     (id, user_id, asset_id, entry_type, quantity, price, fee, notes, advanced_order_id, created_at)
-     SELECT $1, $2, a.id, $3, $4, $5, $6, $7, $8, NOW()
-     FROM assets a
-     JOIN markets m ON m.quote_asset_id = a.id
-     WHERE m.id = $9`,
-    [ledgerId, advOrder.user_id, 'TRADE', advOrder.quantity, fillPrice, 0, 'Take-Profit Triggered', orderId, advOrder.market_id]
-  );
-  
-  return {
-    success: true,
-    orderId,
-    fillPrice,
-    quantity: advOrder.quantity,
-    timestamp: new Date()
-  };
-}
-
-/**
- * Cancel a take-profit order
- * @param {string} orderId - Advanced order ID
- * @returns {object} Canceled order
- */
-export async function cancelTakeProfit(orderId) {
-  const result = await db.query(
-    `UPDATE advanced_orders 
-     SET status = $1, updated_at = NOW()
-     WHERE id = $2 AND status = 'ACTIVE'
-     RETURNING *`,
-    ['CANCELED', orderId]
-  );
-  
-  if (!result.rows.length) {
-    throw new Error('Cannot cancel: order not found or not active');
-  }
-  
-  return result.rows[0];
-}
-
-// ============================================================================
-// ORDER CHAINS (Link SL + TP + Trail)
-// ============================================================================
-
-/**
- * Create an order chain (link multiple advanced orders)
- * @param {string} userId - User ID
- * @param {string} parentTradeId - Parent trade ID (the position being protected)
- * @param {string} stopLossId - Optional stop-loss order ID
- * @param {string} takeProfitId - Optional take-profit order ID
- * @param {string} trailingStopId - Optional trailing stop order ID
- * @returns {object} Created order chain
- */
-export async function createOrderChain(userId, parentTradeId, stopLossId = null, takeProfitId = null, trailingStopId = null) {
-  const chainId = uuidv4();
-  
-  if (!stopLossId && !takeProfitId && !trailingStopId) {
-    throw new Error('At least one order must be specified');
-  }
-  
-  const result = await db.query(
-    `INSERT INTO order_chains 
-     (id, user_id, parent_trade_id, stop_loss_id, take_profit_id, trailing_stop_id, status)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     RETURNING *`,
-    [chainId, userId, parentTradeId, stopLossId, takeProfitId, trailingStopId, 'ACTIVE']
-  );
-  
-  return result.rows[0];
-}
-
-/**
- * Get all active orders for a user
- * @param {string} userId - User ID
- * @returns {array} Array of active advanced orders
- */
-export async function getActiveOrders(userId) {
-  const result = await db.query(
-    `SELECT 
-       ao.id, ao.order_type, ao.trigger_value, ao.quantity, 
-       ao.status, ao.created_at,
-       m.symbol
-     FROM advanced_orders ao
-     JOIN markets m ON ao.market_id = m.id
-     WHERE ao.user_id = $1 AND ao.status = 'ACTIVE'
-     ORDER BY ao.created_at DESC`,
-    [userId]
-  );
-  
-  return result.rows;
-}
-
-/**
- * Get an advanced order by ID
- * @param {string} orderId - Advanced order ID
- * @returns {object} Advanced order
- */
-export async function getAdvancedOrder(orderId) {
-  const result = await db.query(
-    'SELECT * FROM advanced_orders WHERE id = $1',
-    [orderId]
-  );
-  
-  if (!result.rows.length) {
-    throw new Error('Advanced order not found');
-  }
-  
-  return result.rows[0];
-}
-
-/**
- * Get order chains for a parent trade
- * @param {string} parentTradeId - Parent trade ID
- * @returns {array} Array of order chains
- */
-export async function getOrderChains(parentTradeId) {
-  const result = await db.query(
-    `SELECT * FROM order_chains 
-     WHERE parent_trade_id = $1
-     ORDER BY created_at DESC`,
-    [parentTradeId]
-  );
-  
-  return result.rows;
-}
-
-/**
- * Handle cascade cancellation when one order in chain is triggered
- * @param {string} chainId - Order chain ID
- * @param {string} triggeredOrderId - Order that was triggered
- * @returns {object} Result of cascade
- */
-export async function handleOrderChainTrigger(chainId, triggeredOrderId) {
-  const chain = await db.query(
-    'SELECT * FROM order_chains WHERE id = $1',
-    [chainId]
-  );
-  
-  if (!chain.rows.length) {
-    throw new Error('Order chain not found');
-  }
-  
-  const orderChain = chain.rows[0];
-  
-  // Cancel other orders in the chain
-  const ordersToCancel = [];
-  
-  if (orderChain.stop_loss_id && orderChain.stop_loss_id !== triggeredOrderId) {
-    ordersToCancel.push(orderChain.stop_loss_id);
-  }
-  if (orderChain.take_profit_id && orderChain.take_profit_id !== triggeredOrderId) {
-    ordersToCancel.push(orderChain.take_profit_id);
-  }
-  if (orderChain.trailing_stop_id && orderChain.trailing_stop_id !== triggeredOrderId) {
-    ordersToCancel.push(orderChain.trailing_stop_id);
-  }
-  
-  // Cancel all other orders
-  for (const orderId of ordersToCancel) {
-    await db.query(
-      'UPDATE advanced_orders SET status = $1, updated_at = NOW() WHERE id = $2',
-      ['CANCELED', orderId]
+export async function ensureAdvancedOrdersSchema(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS advanced_orders (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      market_id TEXT NOT NULL DEFAULT '${MARKET_ID}',
+      order_type TEXT NOT NULL CHECK (order_type IN ('STOP_LOSS','TAKE_PROFIT','TRAILING_STOP')),
+      side TEXT NOT NULL DEFAULT 'SELL' CHECK (side IN ('BUY','SELL')),
+      trigger_price NUMERIC(28,8),
+      trail_percent NUMERIC(28,8) CHECK (trail_percent IS NULL OR trail_percent > 0),
+      high_water_mark NUMERIC(28,8),
+      current_trigger_price NUMERIC(28,8),
+      quantity NUMERIC(28,8) NOT NULL CHECK (quantity > 0),
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','FILLED','CANCELED','FAILED')),
+      triggered_at TIMESTAMPTZ,
+      fill_price NUMERIC(28,8),
+      filled_order_id UUID,
+      chain_id UUID,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      CONSTRAINT advanced_orders_trigger_fields CHECK (
+        (order_type IN ('STOP_LOSS','TAKE_PROFIT') AND trigger_price IS NOT NULL AND trail_percent IS NULL)
+        OR (order_type = 'TRAILING_STOP' AND trail_percent IS NOT NULL AND trigger_price IS NULL)
+      )
     );
-  }
-  
-  // Update chain status
-  await db.query(
-    `UPDATE order_chains 
-     SET status = $1, triggered_by_order_id = $2, triggered_at = NOW(), updated_at = NOW()
-     WHERE id = $3`,
-    ['TRIGGERED', triggeredOrderId, chainId]
-  );
-  
-  return {
-    chainId,
-    triggeredOrderId,
-    canceledOrders: ordersToCancel,
-    timestamp: new Date()
-  };
+    CREATE INDEX IF NOT EXISTS advanced_orders_user_idx ON advanced_orders (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS advanced_orders_active_idx ON advanced_orders (market_id) WHERE status = 'ACTIVE';
+    CREATE INDEX IF NOT EXISTS advanced_orders_chain_idx ON advanced_orders (chain_id) WHERE chain_id IS NOT NULL;
+
+    CREATE TABLE IF NOT EXISTS trailing_stop_history (
+      id UUID PRIMARY KEY,
+      advanced_order_id UUID NOT NULL REFERENCES advanced_orders(id) ON DELETE CASCADE,
+      price NUMERIC(28,8) NOT NULL,
+      trigger_price NUMERIC(28,8) NOT NULL,
+      recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS trailing_stop_history_order_idx ON trailing_stop_history (advanced_order_id, recorded_at DESC);
+
+    CREATE TABLE IF NOT EXISTS order_chains (
+      id UUID PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      parent_trade_id UUID,
+      stop_loss_order_id UUID REFERENCES advanced_orders(id),
+      take_profit_order_id UUID REFERENCES advanced_orders(id),
+      trailing_stop_order_id UUID REFERENCES advanced_orders(id),
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK (status IN ('ACTIVE','COMPLETED','CANCELED')),
+      triggered_by_order_id UUID,
+      triggered_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+      updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS order_chains_user_idx ON order_chains (user_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS order_chains_parent_trade_idx ON order_chains (parent_trade_id);
+  `);
 }
 
-/**
- * Get orders that need to be checked for triggers
- * @param {string} marketId - Market ID
- * @returns {array} Array of orders to check
- */
-export async function getOrdersToCheck(marketId) {
-  const result = await db.query(
-    `SELECT * FROM advanced_orders 
-     WHERE market_id = $1 AND status = 'ACTIVE'
-     ORDER BY created_at ASC`,
-    [marketId]
+function parsePositiveDecimal(value, label) {
+  let scaled;
+  try {
+    scaled = D.parse(value);
+  } catch {
+    throw new OrderError(`${label} must be a decimal number.`, 400);
+  }
+  if (!D.isPositive(scaled)) throw new OrderError(`${label} must be greater than zero.`, 400);
+  return scaled;
+}
+
+/** Create a stop-loss order: triggers a MARKET sell once price falls to/below triggerPrice. */
+export async function createStopLossOrder(pool, userId, { triggerPrice, quantity, notes = null }) {
+  const triggerScaled = parsePositiveDecimal(triggerPrice, "Trigger price");
+  const quantityScaled = parsePositiveDecimal(quantity, "Quantity");
+  const id = crypto.randomUUID();
+  const result = await pool.query(
+    `INSERT INTO advanced_orders (id, user_id, market_id, order_type, side, trigger_price, quantity, notes, status)
+     VALUES ($1,$2,$3,'STOP_LOSS','SELL',$4,$5,$6,'ACTIVE')
+     RETURNING *`,
+    [id, userId, MARKET_ID, D.format(triggerScaled), D.format(quantityScaled), notes],
   );
-  
+  return result.rows[0];
+}
+
+/** Create a take-profit order: triggers a MARKET sell once price rises to/above triggerPrice. */
+export async function createTakeProfitOrder(pool, userId, { triggerPrice, quantity, notes = null }) {
+  const triggerScaled = parsePositiveDecimal(triggerPrice, "Trigger price");
+  const quantityScaled = parsePositiveDecimal(quantity, "Quantity");
+  const id = crypto.randomUUID();
+  const result = await pool.query(
+    `INSERT INTO advanced_orders (id, user_id, market_id, order_type, side, trigger_price, quantity, notes, status)
+     VALUES ($1,$2,$3,'TAKE_PROFIT','SELL',$4,$5,$6,'ACTIVE')
+     RETURNING *`,
+    [id, userId, MARKET_ID, D.format(triggerScaled), D.format(quantityScaled), notes],
+  );
+  return result.rows[0];
+}
+
+export function shouldTriggerStopLoss(order, currentPrice) {
+  return D.parse(currentPrice) <= D.parse(order.trigger_price);
+}
+
+export function shouldTriggerTakeProfit(order, currentPrice) {
+  return D.parse(currentPrice) >= D.parse(order.trigger_price);
+}
+
+/** Execute a triggered advanced order as a MARKET order through the real matching engine. */
+export async function executeAdvancedOrder(pool, order) {
+  const placed = await placeOrder(pool, {
+    userId: order.user_id,
+    side: order.side,
+    type: "MARKET",
+    quantity: order.quantity,
+  });
+  const fillPrice = placed.trades.length ? placed.trades[placed.trades.length - 1].price : null;
+  const updated = await pool.query(
+    `UPDATE advanced_orders
+     SET status = 'FILLED', triggered_at = now(), fill_price = $1, filled_order_id = $2, updated_at = now()
+     WHERE id = $3
+     RETURNING *`,
+    [fillPrice, placed.orderId, order.id],
+  );
+  if (order.chain_id) await completeChainSibling(pool, order.chain_id, order.id);
+  return { advancedOrder: updated.rows[0], placedOrder: placed };
+}
+
+async function completeChainSibling(pool, chainId, triggeredOrderId) {
+  const canceled = await pool.query(
+    `UPDATE advanced_orders SET status = 'CANCELED', updated_at = now()
+     WHERE chain_id = $1 AND id <> $2 AND status = 'ACTIVE'
+     RETURNING id`,
+    [chainId, triggeredOrderId],
+  );
+  await pool.query(
+    `UPDATE order_chains SET status = 'COMPLETED', triggered_by_order_id = $1, triggered_at = now(), updated_at = now()
+     WHERE id = $2`,
+    [triggeredOrderId, chainId],
+  );
+  return canceled.rows.map((row) => row.id);
+}
+
+/** Cancel any active advanced order (stop-loss, take-profit, or trailing stop) owned by userId. */
+export async function cancelAdvancedOrder(pool, userId, orderId) {
+  const result = await pool.query(
+    `UPDATE advanced_orders SET status = 'CANCELED', updated_at = now()
+     WHERE id = $1 AND user_id = $2 AND status = 'ACTIVE'
+     RETURNING *`,
+    [orderId, userId],
+  );
+  if (!result.rows.length) throw new OrderError("Advanced order not found or not active.", 404);
+  return result.rows[0];
+}
+
+export async function getUserAdvancedOrders(pool, userId) {
+  const result = await pool.query(
+    `SELECT * FROM advanced_orders WHERE user_id = $1 ORDER BY created_at DESC LIMIT 200`,
+    [userId],
+  );
   return result.rows;
 }
 
-export default {
-  // Stop-Loss
-  createStopLossOrder,
-  shouldTriggerStopLoss,
-  executeStopLoss,
-  cancelStopLoss,
-  
-  // Take-Profit
-  createTakeProfitOrder,
-  shouldTriggerTakeProfit,
-  executeTakeProfit,
-  cancelTakeProfit,
-  
-  // Order Chains
-  createOrderChain,
-  handleOrderChainTrigger,
-  
-  // General
-  getActiveOrders,
-  getAdvancedOrder,
-  getOrderChains,
-  getOrdersToCheck
-};
+export async function getAdvancedOrderById(pool, userId, orderId) {
+  const result = await pool.query(`SELECT * FROM advanced_orders WHERE id = $1 AND user_id = $2`, [orderId, userId]);
+  if (!result.rows.length) throw new OrderError("Advanced order not found.", 404);
+  return result.rows[0];
+}
+
+/** All ACTIVE advanced orders across all users — used by the monitor service. */
+export async function getActiveAdvancedOrders(pool) {
+  const result = await pool.query(`SELECT * FROM advanced_orders WHERE status = 'ACTIVE' ORDER BY created_at ASC`);
+  return result.rows;
+}
+
+/**
+ * Create an order chain — an OCO (one-cancels-other) group. Provide at
+ * least one of stopLoss / takeProfit / trailingStop as `{ triggerPrice,
+ * quantity, notes }` (or `{ trailPercent, quantity, notes }` for
+ * trailingStop). When any one order in the chain fills, its siblings are
+ * automatically canceled (see completeChainSibling above).
+ */
+export async function createOrderChain(pool, userId, { parentTradeId = null, stopLoss = null, takeProfit = null, trailingStop = null }) {
+  if (!stopLoss && !takeProfit && !trailingStop) {
+    throw new OrderError("An order chain needs at least one of stopLoss, takeProfit, or trailingStop.", 400);
+  }
+  const chainId = crypto.randomUUID();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    let stopLossOrder = null;
+    let takeProfitOrder = null;
+    let trailingStopOrder = null;
+    if (stopLoss) stopLossOrder = await createStopLossOrder(client, userId, stopLoss);
+    if (takeProfit) takeProfitOrder = await createTakeProfitOrder(client, userId, takeProfit);
+    if (trailingStop) {
+      const { createTrailingStopOrder } = await import("./trailing-stops.mjs");
+      trailingStopOrder = await createTrailingStopOrder(client, userId, trailingStop);
+    }
+    for (const order of [stopLossOrder, takeProfitOrder, trailingStopOrder]) {
+      if (!order) continue;
+      await client.query("UPDATE advanced_orders SET chain_id = $1 WHERE id = $2", [chainId, order.id]);
+    }
+    const chain = await client.query(
+      `INSERT INTO order_chains (id, user_id, parent_trade_id, stop_loss_order_id, take_profit_order_id, trailing_stop_order_id, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'ACTIVE')
+       RETURNING *`,
+      [chainId, userId, parentTradeId, stopLossOrder?.id ?? null, takeProfitOrder?.id ?? null, trailingStopOrder?.id ?? null],
+    );
+    await client.query("COMMIT");
+    return chain.rows[0];
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getOrderChain(pool, userId, chainId) {
+  const result = await pool.query(`SELECT * FROM order_chains WHERE id = $1 AND user_id = $2`, [chainId, userId]);
+  if (!result.rows.length) throw new OrderError("Order chain not found.", 404);
+  return result.rows[0];
+}
+
+export async function getOrderChainsForTrade(pool, userId, parentTradeId) {
+  const result = await pool.query(
+    `SELECT * FROM order_chains WHERE user_id = $1 AND parent_trade_id = $2 ORDER BY created_at DESC`,
+    [userId, parentTradeId],
+  );
+  return result.rows;
+}
