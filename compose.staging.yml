@@ -10,7 +10,7 @@ services:
       DATABASE_URL: postgresql://nexa_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@postgres:5432/exchange
       REDIS_URL: redis://redis:6379
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-generic}
+      EMAIL_PROVIDER: aws-ses
       EMAIL_API_URL: ${EMAIL_API_URL:-}
       EMAIL_API_KEY: ${EMAIL_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM}
