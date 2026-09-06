@@ -45,6 +45,8 @@ jobs:
         run: npm run typecheck
       - name: Build web application
         run: npm run build
+      - name: Create CI test environment
+        run: cp .env.example .env
       - name: Run test suite
         run: npm run test
       - name: Validate staging configuration
