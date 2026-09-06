@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 function required(environment, name) {
   const value = String(environment[name] ?? "").trim();
   if (!value) throw new Error(`${name} is required.`);
@@ -56,7 +58,7 @@ export function validateStagingEnvironment(environment) {
   return { domain, provider, smokeEmail };
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = validateStagingEnvironment(process.env);
   console.log(`Staging environment preflight passed for ${result.domain} using ${result.provider}.`);
 }
