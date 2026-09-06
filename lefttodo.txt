@@ -1,0 +1,76 @@
+# Nexa Exchange — Current Continuation Checklist
+
+**Updated:** 2026-09-06
+
+This replaces the older checklist. Do not delete Docker volumes, create another EC2 instance, or repeatedly rerun the same failed commit.
+
+## Confirmed complete
+
+- GitHub pull requests #5–#8 are merged into `main`.
+- CI now creates its test environment and passes the active 146-test verification suite.
+- Obsolete framework-dependent test files are quarantined and documented.
+- The self-hosted GitHub runner and protected `staging` environment were configured.
+- The existing PostgreSQL data volume was discovered and preserved during Compose adoption.
+- Cloudflare DNS and Full (strict) TLS were previously configured.
+- Amazon SES domain/DKIM, configuration-set events, suppression, and SNS email subscription were configured.
+- A $25 AWS budget and notification recipient were configured.
+
+## Current blocker
+
+- The public staging endpoint refused HTTPS connections on 2026-09-06.
+- GitHub deployment run #6 passed `verify` but failed during database migration.
+- The recovered app reported PostgreSQL password authentication failure for `nexa_app`.
+- The failed rollback removed the Compose network and did not fully restore the service set.
+- The local `shopboostlabs` AWS CLI login has expired, so live EC2/container state must be rechecked after login.
+
+## Do next, in order
+
+1. Reauthenticate AWS CLI:
+
+   ```powershell
+   aws login --profile shopboostlabs
+   aws sts get-caller-identity --profile shopboostlabs
+   ```
+
+2. Confirm that the selected Region is still `us-east-1` in AWS Settings and that the project is not paused by a spend limit.
+
+3. Inspect EC2 instance `i-06f7fed554bb8b1c1`, security group `sg-010d47a582268d10b`, the GitHub runner service, Docker containers, networks, and volumes. Do not expose PostgreSQL `5432` or Redis `6379`.
+
+4. Synchronize only the `nexa_app` and `nexa_migrator` database-role passwords with `/home/ubuntu/.env.staging`. Never display or paste those passwords.
+
+5. Restore PostgreSQL, Redis, app, and proxy using the preserved PostgreSQL volume. Require the internal readiness endpoint and public HTTPS health endpoint to pass.
+
+6. Run the migration manually once and capture its exact output. Fix the underlying migration problem before rerunning GitHub Actions.
+
+7. Update the deployment workflow so it:
+   - starts PostgreSQL and Redis first;
+   - safely synchronizes database roles;
+   - captures migration logs;
+   - starts app and proxy only after migration succeeds;
+   - rolls back without deleting the working network or losing service connectivity.
+
+8. Run a fresh deployment from `main`. Require both `verify` and `deploy` to pass.
+
+9. Repeat staging smoke tests: health/readiness, sign-in/out, registration, email verification, password reset, 2FA, trading, cancellation, administrator controls, PostgreSQL/Redis health, and ledger invariants.
+
+10. Apply Ubuntu security updates and reboot only after deployment and rollback are stable. Confirm Docker containers and the GitHub runner return automatically.
+
+## Remaining staging work
+
+- Scan the deployed container and production dependencies.
+- Confirm no secrets appear in logs, artifacts, screenshots, or client responses.
+- Test account/IP rate limits from multiple clients.
+- Run multi-instance load, reconnect, concurrency, restart, and failure-injection tests.
+- Connect monitoring and prove readiness/error/latency/database/Redis/memory/disk alerts.
+- Schedule encrypted off-machine backups and complete an isolated restore drill.
+- Define recovery objectives and finish incident/rollback runbooks.
+- Monitor SES case `178864133300316`; production sending is still pending. Do not submit duplicate cases.
+- Move routine AWS access away from the root identity, enable root MFA, and remove unnecessary root access keys after confirming the EC2 role works.
+
+## Before any real-money launch
+
+- Complete qualified Canadian legal review covering FINTRAC, securities, custody, consumer protection, privacy, and provincial requirements.
+- Select production custody and key-management architecture.
+- Implement and independently review KYC/AML, sanctions, transaction monitoring, market surveillance, reconciliation, withdrawal controls, and incident response.
+- Complete independent security and penetration testing.
+- Keep deposits, withdrawals, real wallets, private keys, and customer funds disabled until formal legal, compliance, custody, accounting, security, and operational approval.

@@ -18,5 +18,11 @@ test("staging deployment is manual, verified, serialized, and environment-protec
   assert.match(workflow, /POSTGRES_VOLUME_NAME/);
   assert.match(workflow, /\/var\/lib\/postgresql\/data/);
   assert.match(workflow, /for service in app postgres redis proxy/);
+  assert.match(workflow, /sync-staging-db-role-passwords\.mjs/);
+  assert.match(workflow, /run --rm migrate/);
+  assert.match(workflow, /up -d --no-deps postgres redis/);
+  assert.match(workflow, /up -d --no-deps app/);
+  assert.match(workflow, /up -d --no-deps proxy/);
+  assert.doesNotMatch(workflow, /compose[^\n]* down/);
   assert.match(workflow, /api\/ready/);
 });
