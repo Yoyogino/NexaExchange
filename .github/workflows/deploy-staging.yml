@@ -43,7 +43,7 @@ jobs:
       - name: Create CI test environment
         run: cp .env.example .env
       - run: npm test
-      - run: docker compose --env-file .env.staging.example -f compose.staging.yml config --quiet
+      - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
 
   deploy:
     needs: verify
