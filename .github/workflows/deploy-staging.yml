@@ -43,21 +43,23 @@ jobs:
       - name: Create CI test environment
         run: |
           cp .env.example .env
-          echo "STAGING_DOMAIN=localhost" >> .env
+          echo "NODE_ENV=production" >> .env
+          echo "PORT=3000" >> .env
+          echo "STAGING_DOMAIN=exchange-staging.shopboostlabs.com" >> .env
           echo "POSTGRES_USER=exchange" >> .env
           echo "POSTGRES_PASSWORD=exchange_dev_password" >> .env
-          echo "POSTGRES_APP_PASSWORD=exchange_dev_password" >> .env
-          echo "POSTGRES_MIGRATION_PASSWORD=exchange_dev_password" >> .env
+          echo "POSTGRES_APP_PASSWORD=secure_app_password_123" >> .env
+          echo "POSTGRES_MIGRATION_PASSWORD=secure_migration_password_123" >> .env
           echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
           echo "BACKUP_ENCRYPTION_KEY=aUg9eY9GhkzVsfyNmn0FK2v/EJ9jdsjUPWhQfzMKlc8=" >> .env
           echo "MONITORING_TOKEN=c02d821f0775b1a414fda6489011e3d1" >> .env
-          echo "EMAIL_FROM=staging@example.com" >> .env
-          echo "SMTP_HOST=localhost" >> .env
+          echo "EMAIL_FROM=staging@exchange-staging.shopboostlabs.com" >> .env
+          echo "SMTP_HOST=uemujs3krimu.fips.wmjb.mail-manager-smtp.amazonaws.com" >> .env
           echo "SMTP_PORT=587" >> .env
-          echo "SMTP_USER=dummy" >> .env
-          echo "SMTP_PASSWORD=dummy" >> .env
+          echo "SMTP_USER=inp-" >> .env
+          echo "SMTP_PASSWORD=pQ#oz*f}4pgj%&cl11]CkVgInWb,*lG%" >> .env
           echo "OFFSITE_BACKUP_DIRECTORY=/backups" >> .env
-          echo "EMAIL_PROVIDER=generic" >> .env
+          echo "EMAIL_PROVIDER=smtp" >> .env
       - run: npm test
       - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
 
