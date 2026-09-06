@@ -33,7 +33,7 @@ jobs:
       DATABASE_URL: postgresql://exchange:exchange_dev_password@localhost:5432/exchange_demo
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
