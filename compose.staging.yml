@@ -56,6 +56,10 @@ services:
   proxy:
     image: caddy:2-alpine
     restart: unless-stopped
+    # Containers cannot use systemd-resolved's host-only 127.0.0.53 stub.
+    # Use the VPC Route 53 Resolver so Caddy can reach ACME issuers reliably.
+    dns:
+      - 169.254.169.253
     environment:
       STAGING_DOMAIN: ${STAGING_DOMAIN:?Set STAGING_DOMAIN}
     ports:
@@ -108,3 +112,4 @@ volumes:
     name: ${POSTGRES_VOLUME_NAME:-ubuntu_staging_postgres}
   staging_redis:
   caddy_data:
+    name: ubuntu_caddy_public
