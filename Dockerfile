@@ -9,7 +9,11 @@ FROM node:24-alpine AS runtime
 ENV NODE_ENV=production
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --omit=dev && npm cache clean --force && apk add --no-cache postgresql-client
+RUN apk upgrade --no-cache \
+    && apk add --no-cache postgresql-client \
+    && npm ci --omit=dev \
+    && npm cache clean --force \
+    && rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npm /usr/local/bin/npx
 COPY --from=build /app/dist ./dist
 COPY server ./server
 COPY scripts ./scripts
