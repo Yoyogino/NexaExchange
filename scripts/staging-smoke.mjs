@@ -4,6 +4,20 @@ function expectStatus(response, expected, label) {
   if (response.status !== expected) throw new Error(`${label}: expected HTTP ${expected}, received ${response.status}.`);
 }
 
+function expectSessionCookieSecurity(response) {
+  const values = response.headers.getSetCookie?.() ?? [];
+  const session = values.find((value) => value.startsWith("nexa_session="));
+  const csrf = values.find((value) => value.startsWith("nexa_csrf="));
+  if (!session || !csrf) throw new Error("Authentication did not set both session and CSRF cookies.");
+  for (const [label, value] of [["Session", session], ["CSRF", csrf]]) {
+    if (!/;\s*Secure(?:;|$)/i.test(value)) throw new Error(`${label} cookie is missing Secure.`);
+    if (!/;\s*SameSite=Strict(?:;|$)/i.test(value)) throw new Error(`${label} cookie is missing SameSite=Strict.`);
+    if (!/;\s*Path=\/(?:;|$)/i.test(value)) throw new Error(`${label} cookie is missing Path=/.`);
+  }
+  if (!/;\s*HttpOnly(?:;|$)/i.test(session)) throw new Error("Session cookie is missing HttpOnly.");
+  if (/;\s*HttpOnly(?:;|$)/i.test(csrf)) throw new Error("CSRF cookie must remain readable by the browser client.");
+}
+
 class CookieJar {
   constructor() { this.cookies = new Map(); }
   capture(response) {
@@ -40,6 +54,7 @@ export async function runStagingSmoke({ baseUrl, email, password, fetchImpl = fe
   let authenticated = await request("/api/auth/register", { method: "POST", body: { email, password } });
   if (authenticated.status === 409) authenticated = await request("/api/auth/login", { method: "POST", body: { email, password } });
   expectStatus(authenticated, authenticated.status === 201 ? 201 : 200, "Smoke-account authentication");
+  expectSessionCookieSecurity(authenticated);
 
   const me = await request("/api/me");
   expectStatus(me, 200, "Authenticated account check");
@@ -52,7 +67,9 @@ export async function runStagingSmoke({ baseUrl, email, password, fetchImpl = fe
   for (const [path, label] of [["/api/market", "Market"], ["/api/orders", "Orders"], ["/api/trades", "Trades"]]) {
     expectStatus(await request(path), 200, `${label} API check`);
   }
+  expectStatus(await request("/api/auth/logout", { method: "POST" }), 403, "Missing-CSRF rejection");
   expectStatus(await request("/api/auth/logout", { method: "POST", csrf: true }), 204, "Logout check");
+  expectStatus(await request("/api/me"), 401, "Post-logout session revocation check");
   return { email: account.user.email };
 }
 

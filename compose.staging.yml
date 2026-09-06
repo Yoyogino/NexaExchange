@@ -10,13 +10,12 @@ services:
       DATABASE_URL: postgresql://nexa_app:${POSTGRES_APP_PASSWORD:?Set POSTGRES_APP_PASSWORD}@postgres:5432/exchange
       REDIS_URL: redis://redis:6379
       DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:?Set DATA_ENCRYPTION_KEY}
-      EMAIL_PROVIDER: ${EMAIL_PROVIDER:-generic}
+      EMAIL_PROVIDER: aws-ses
       EMAIL_API_URL: ${EMAIL_API_URL:-}
       EMAIL_API_KEY: ${EMAIL_API_KEY:-}
       EMAIL_FROM: ${EMAIL_FROM:?Set EMAIL_FROM}
       AWS_REGION: ${AWS_REGION:-us-east-1}
-      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
-      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+      SES_CONFIGURATION_SET: ${SES_CONFIGURATION_SET:-}
       MONITORING_TOKEN: ${MONITORING_TOKEN:?Set MONITORING_TOKEN}
     depends_on:
       migrate:
@@ -105,5 +104,7 @@ services:
 
 volumes:
   staging_postgres:
+    external: true
+    name: ${POSTGRES_VOLUME_NAME:-ubuntu_staging_postgres}
   staging_redis:
   caddy_data:

@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 import { validateStagingEnvironment } from "../scripts/validate-staging-env.mjs";
 
@@ -38,4 +40,22 @@ test("staging preflight rejects placeholders, reused passwords, and malformed ke
 test("staging preflight enforces provider-specific email configuration", () => {
   assert.throws(() => validateStagingEnvironment({ ...valid, EMAIL_API_KEY: "wrong" }), /SendGrid/);
   assert.throws(() => validateStagingEnvironment({ ...valid, EMAIL_PROVIDER: "generic", EMAIL_API_URL: "http://mail.nexa.test" }), /HTTPS/);
+  const ses = {
+    ...valid,
+    EMAIL_PROVIDER: "aws-ses",
+    AWS_REGION: "us-east-1",
+    SES_CONFIGURATION_SET: "nexa-transactional",
+  };
+  assert.doesNotThrow(() => validateStagingEnvironment(ses));
+  assert.throws(() => validateStagingEnvironment({ ...ses, SES_CONFIGURATION_SET: "" }), /SES_CONFIGURATION_SET/);
+});
+
+test("staging preflight executes when launched as a CLI", () => {
+  const script = fileURLToPath(new URL("../scripts/validate-staging-env.mjs", import.meta.url));
+  const result = spawnSync(process.execPath, [script], {
+    encoding: "utf8",
+    env: { ...process.env, ...valid, STAGING_URL: "http://staging.nexa.test" },
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /STAGING_URL must be the HTTPS root URL/);
 });

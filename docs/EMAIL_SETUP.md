@@ -76,18 +76,9 @@ AWS SES is suitable for high-volume production deployments.
 5. Add the DKIM CNAME records to your domain DNS
 6. Wait for verification (can take 24+ hours)
 
-### 3. Create an IAM User with SES Permissions
+### 3. Grant the workload role SES permissions
 
-1. Go to **IAM** → **Users**
-2. Click **Create user**
-3. Name it (e.g., `nexa-exchange`)
-4. Click **Attach policies directly**
-5. Search for `AmazonSESFullAccess` and select it
-6. Click **Create user**
-7. Click on the user and go to **Security credentials**
-8. Click **Create access key**
-9. Choose **Application running outside AWS**
-10. Copy the Access Key ID and Secret Access Key
+Grant the EC2 instance role only `ses:SendEmail` and `ses:SendRawEmail` for the verified sender identity. The AWS SDK uses the instance metadata credential provider automatically, so staging does not need long-lived access keys.
 
 ### 4. Configure Environment Variables
 
@@ -95,8 +86,7 @@ AWS SES is suitable for high-volume production deployments.
 # AWS SES configuration
 EMAIL_PROVIDER=aws-ses
 AWS_REGION=us-east-1
-AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF
-AWS_SECRET_ACCESS_KEY=your_secret_key_here
+SES_CONFIGURATION_SET=nexa-transactional
 EMAIL_FROM="Nexa Exchange <noreply@example.com>"
 ```
 
@@ -105,7 +95,7 @@ EMAIL_FROM="Nexa Exchange <noreply@example.com>"
 SES accounts start in **Sandbox Mode**, which limits sending:
 - Only verified recipients
 - 1 email per second max
-- 50 emails per 24 hours
+- 200 emails per 24 hours
 
 To use in production, request **Production Access**:
 
@@ -113,6 +103,8 @@ To use in production, request **Production Access**:
 2. Click **Request Production Access**
 3. Answer the questionnaire
 4. Wait for approval (typically 24 hours)
+
+Before requesting access, enable account-level suppression for bounces and complaints and attach an SES configuration-set event destination to a monitored SNS topic. Configure the application with that configuration-set name so every transactional message produces the expected delivery events.
 
 ### 6. Test Email Delivery
 
@@ -155,8 +147,8 @@ The request format sent to your API:
 | `EMAIL_FROM` | Yes | N/A | Sender address: `"Name <email@example.com>"` |
 | `EMAIL_API_KEY` | Depends | N/A | API key (SendGrid, generic) |
 | `AWS_REGION` | For SES | `us-east-1` | AWS region for SES |
-| `AWS_ACCESS_KEY_ID` | For SES | N/A | AWS access key |
-| `AWS_SECRET_ACCESS_KEY` | For SES | N/A | AWS secret key |
+| `SES_CONFIGURATION_SET` | For SES | N/A | Configuration set used for bounce and complaint events |
+| Workload credentials | For SES | EC2 instance role | Automatically resolved by the AWS SDK default credential chain |
 | `EMAIL_API_URL` | For generic | N/A | Custom email API endpoint |
 
 ---
