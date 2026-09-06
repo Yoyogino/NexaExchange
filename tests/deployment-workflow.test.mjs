@@ -15,5 +15,8 @@ test("staging deployment is manual, verified, serialized, and environment-protec
   assert.doesNotMatch(workflow, /STAGING_SSH_PRIVATE_KEY|STAGING_SSH_KNOWN_HOSTS/);
   assert.match(workflow, /\/home\/ubuntu\/\.env\.staging/);
   assert.match(workflow, /id -nG \| grep -qw docker/);
+  assert.match(workflow, /POSTGRES_VOLUME_NAME/);
+  assert.match(workflow, /\/var\/lib\/postgresql\/data/);
+  assert.match(workflow, /for service in app postgres redis proxy/);
   assert.match(workflow, /api\/ready/);
 });

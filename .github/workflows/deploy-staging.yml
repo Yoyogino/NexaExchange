@@ -71,21 +71,43 @@ jobs:
             echo "Runner user must belong to the docker group."
             exit 1
           fi
-          legacy_backup=""
-          if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
-            compose_project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' ubuntu-app-1)"
-            if [ "$compose_project" != "ubuntu" ]; then
-              legacy_backup="ubuntu-app-1-pre-workflow"
-              docker rm -f "$legacy_backup" >/dev/null 2>&1 || true
-              docker stop ubuntu-app-1 >/dev/null
-              docker rename ubuntu-app-1 "$legacy_backup"
+
+          postgres_volume="ubuntu_staging_postgres"
+          if docker inspect ubuntu-postgres-1 >/dev/null 2>&1; then
+            postgres_volume="$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/postgresql/data"}}{{.Name}}{{end}}{{end}}' ubuntu-postgres-1)"
+            if [ -z "$postgres_volume" ]; then
+              echo "Unable to identify the existing PostgreSQL data volume."
+              exit 1
             fi
+          else
+            docker volume create "$postgres_volume" >/dev/null
           fi
+          printf '\nPOSTGRES_VOLUME_NAME=%s\n' "$postgres_volume" >> .env.compose
+
+          legacy_backups=""
+          for service in app postgres redis proxy; do
+            container="ubuntu-${service}-1"
+            if docker inspect "$container" >/dev/null 2>&1; then
+              compose_project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' "$container")"
+              if [ "$compose_project" != "ubuntu" ]; then
+                backup="${container}-pre-workflow"
+                docker rm -f "$backup" >/dev/null 2>&1 || true
+                docker stop "$container" >/dev/null
+                docker rename "$container" "$backup"
+                legacy_backups="$legacy_backups $container"
+              fi
+            fi
+          done
+
           if ! docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --build --remove-orphans; then
-            docker rm -f ubuntu-app-1 >/dev/null 2>&1 || true
-            if [ -n "$legacy_backup" ]; then
-              docker rename "$legacy_backup" ubuntu-app-1
-              docker start ubuntu-app-1 >/dev/null
+            docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml down >/dev/null 2>&1 || true
+            for container in $legacy_backups; do
+              backup="${container}-pre-workflow"
+              docker rm -f "$container" >/dev/null 2>&1 || true
+              docker rename "$backup" "$container"
+              docker start "$container" >/dev/null
+            done
+            if docker inspect ubuntu-proxy-1 >/dev/null 2>&1; then
               docker restart ubuntu-proxy-1 >/dev/null
             fi
             exit 1

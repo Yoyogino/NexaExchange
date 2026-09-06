@@ -104,5 +104,7 @@ services:
 
 volumes:
   staging_postgres:
+    external: true
+    name: ${POSTGRES_VOLUME_NAME:-ubuntu_staging_postgres}
   staging_redis:
   caddy_data:
