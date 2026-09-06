@@ -26,7 +26,7 @@ export const ASSETS = ["BTC", "USDT"];
 export const ACCOUNT_TYPES = ["AVAILABLE", "LOCKED", "SYSTEM_ISSUANCE", "FEE"];
 
 export async function ensureLedgerSchema(pool) {
-  await pool.query(`
+  const tableExists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'users'"); if (!tableExists.rows.length) await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id UUID PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,

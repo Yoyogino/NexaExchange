@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import * as D from "./decimal.mjs";
 import { MARKET_ID, OrderError, placeOrder } from "./matching.mjs";
 
-export async function ensureAdvancedOrdersSchema(pool) {
+export async function ensureAdvancedOrdersSchema(pool) { const exists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'advanced_orders' OR table_name = 'orders'"); if (exists.rows.length) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS advanced_orders (
       id UUID PRIMARY KEY,
@@ -127,15 +127,21 @@ export async function executeAdvancedOrder(pool, order) {
     type: "MARKET",
     quantity: order.quantity,
   });
-  const fillPrice = placed.trades.length ? placed.trades[placed.trades.length - 1].price : null;
+  const executedQuantity = D.parse(placed.filledQuantity ?? "0");
+  const executed = placed.trades.length > 0 && D.isPositive(executedQuantity);
+  const executionStatus = executed ? "FILLED" : "FAILED";
+  const fillPrice = executed ? placed.trades[placed.trades.length - 1].price : null;
   const updated = await pool.query(
     `UPDATE advanced_orders
-     SET status = 'FILLED', triggered_at = now(), fill_price = $1, filled_order_id = $2, updated_at = now()
-     WHERE id = $3
+     SET status = $1, triggered_at = now(), fill_price = $2, filled_order_id = $3, updated_at = now()
+     WHERE id = $4
      RETURNING *`,
-    [fillPrice, placed.orderId, order.id],
+    [executionStatus, fillPrice, placed.orderId, order.id],
   );
-  if (order.chain_id) await completeChainSibling(pool, order.chain_id, order.id);
+  // A triggered market order can close without a trade when the opposite
+  // side of the book is empty. Do not report that as a fill or cancel an
+  // OCO sibling: no execution actually occurred.
+  if (executed && order.chain_id) await completeChainSibling(pool, order.chain_id, order.id);
   return { advancedOrder: updated.rows[0], placedOrder: placed };
 }
 

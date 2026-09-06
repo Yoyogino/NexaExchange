@@ -46,7 +46,7 @@ export class OrderError extends Error {
   }
 }
 
-export async function ensureMarketSchema(pool) {
+export async function ensureMarketSchema(pool) { const tableExists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'markets'"); if (tableExists.rows.length) return;
   await pool.query(`
     CREATE TABLE IF NOT EXISTS markets (
       id TEXT PRIMARY KEY,
