@@ -14,6 +14,10 @@ test("encrypts authenticator secrets with authenticated encryption", () => {
 test("rejects tampered ciphertext and preserves legacy plaintext for migration", () => {
   const key = crypto.randomBytes(32);
   const encrypted = encryptSecret("SECRET", key);
-  assert.throws(() => decryptSecret(`${encrypted.slice(0, -1)}A`, key));
+  const parts = encrypted.split(":");
+  const ciphertext = Buffer.from(parts[4], "base64url");
+  ciphertext[0] ^= 1;
+  parts[4] = ciphertext.toString("base64url");
+  assert.throws(() => decryptSecret(parts.join(":"), key));
   assert.equal(decryptSecret("LEGACYSECRET", key), "LEGACYSECRET");
 });
