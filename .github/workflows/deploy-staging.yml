@@ -42,10 +42,11 @@ jobs:
       - run: npm run build
       - name: Create CI test environment
         run: |
-          cp .env.example .env
+          rm -f .env
+          touch .env
+          echo "STAGING_DOMAIN=exchange-staging.shopboostlabs.com" >> .env
           echo "NODE_ENV=production" >> .env
           echo "PORT=3000" >> .env
-          echo "STAGING_DOMAIN=exchange-staging.shopboostlabs.com" >> .env
           echo "POSTGRES_USER=exchange" >> .env
           echo "POSTGRES_PASSWORD=exchange_dev_password" >> .env
           echo "POSTGRES_APP_PASSWORD=secure_app_password_123" >> .env
