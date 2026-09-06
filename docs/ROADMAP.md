@@ -1,8 +1,9 @@
 # Nexa Crypto Exchange — Master Roadmap
 
-**Last reviewed:** 2026-09-03  
-**Current product:** Local simulated BTC/USDT exchange  
-**Current validation:** 146 automated checks, TypeScript validation, and production web build passing  
+**Last reviewed:** 2026-09-05
+
+**Current product:** Simulated BTC/USDT exchange deployed to staging
+**Current validation:** 146 automated checks, TypeScript validation, production web build, public HTTPS health, and SES configuration-set delivery passing
 **Safety boundary:** The application uses demo funds only. It must not accept deposits, process withdrawals, connect real wallets, custody keys, or move real assets.
 
 ## Status key
@@ -15,7 +16,13 @@
 
 The local simulated exchange is feature-complete for its present scope. Users can register, secure an account, trade simulated BTC/USDT, view balances and activity, and use real-time updates. Administrators can operate the simulated market and inspect activity. Financial mutations use a double-entry ledger and PostgreSQL transactions, and permanent financial/audit records are protected at both trigger and runtime-permission levels.
 
-The next engineering milestone is not another local feature. It is a controlled **staging deployment**, followed by operational validation and independent review. A real-money launch is a separate program with substantial legal, compliance, custody, payments, security, and operational requirements.
+The simulated exchange is now deployed to a controlled HTTPS staging environment. Phase 5 advanced orders and their single-app failure cases have been verified end-to-end. Transactional email works through Amazon SES with DKIM, bounce/complaint suppression, and SNS alerts; production sending remains blocked pending reconsideration of SES case `178864133300316`. The next engineering milestone is broader staging security and integration validation, followed by scale testing, monitoring evidence, and independent review. A real-money launch is a separate program with substantial legal, compliance, custody, payments, security, and operational requirements.
+
+## Immediate next actions
+
+1. Request reconsideration of denied Amazon SES production-access case `178864133300316`, citing the now-active bounce/complaint suppression and SNS event destination.
+2. Confirm the protected GitHub `staging` environment and deployment secrets, then exercise the deployment workflow.
+3. Run dependency and container scans against the deployed release.
 
 ## Roadmap from the beginning
 
@@ -147,24 +154,51 @@ The next engineering milestone is not another local feature. It is a controlled 
 - TypeScript validation and production web builds pass.
 - Internal threat model and automated dependency/container security gates are present.
 
+### M. Advanced orders — ✅ Complete for single-app staging
+
+- Stop-loss, take-profit, trailing-stop, and linked order-chain/OCO APIs are implemented.
+- Advanced-order database tables and indexes are deployed to staging.
+- The background monitor evaluates active advanced orders against the latest market price.
+- A stop-loss was created through the authenticated API and remained `ACTIVE` before its trigger.
+- A simulated trade at 45,000 USDT triggered a 50,000 USDT stop-loss.
+- The monitor executed the resulting market order through the existing ledger-safe matching engine.
+- The advanced order changed from `ACTIVE` to `FILLED`, recorded its trigger time, fill price, and filled order ID, and emitted an `advanced_order_triggered` event.
+- A take-profit was created at 55,000 USDT and changed from `ACTIVE` to `FILLED` within one monitor cycle when a simulated 55,000 USDT bid became available.
+- The take-profit recorded a 55,000 USDT fill price and a filled order ID through the normal ledger-safe matching path.
+- A 10% trailing stop initialized at a 55,000 USDT high-water mark with a 49,500 USDT trigger.
+- A simulated rise to 60,000 USDT ratcheted the trigger upward to 54,000 USDT and preserved both updates in trailing-stop history.
+- A simulated fall to 53,000 USDT triggered the trailing stop, which changed from `ACTIVE` to `FILLED` and recorded the correct fill and linked order IDs.
+- An OCO chain containing a 50,000 USDT stop-loss and 55,000 USDT take-profit was created with both legs `ACTIVE`.
+- A simulated 55,000 USDT bid filled the take-profit, changed the chain to `COMPLETED`, recorded the triggering leg, and automatically changed the stop-loss sibling to `CANCELED`.
+- Staging testing found and fixed a zero-liquidity defect that had incorrectly labeled an unfilled advanced order as `FILLED` with a null fill price.
+- A triggered market order with no bids now leaves its ordinary order unfilled, marks the advanced order `FAILED`, records a structured `NO_LIQUIDITY` event, and never reports a fill price.
+- When the failed leg belongs to an OCO chain, the chain and its valid sibling remain `ACTIVE`; no sibling is canceled without a real execution.
+- An `ACTIVE` take-profit and its authenticated session survived an app-container restart; readiness returned and the restarted monitor subsequently filled the order at 56,000 USDT.
+- Three take-profit orders became eligible in the same monitor cycle, filled exactly once at 57,000 USDT with three unique resulting order IDs, and consumed the matching 0.06 BTC bid without leaving book residue.
+- Phase 5 is complete for the current single-app staging topology. Multi-instance monitor/duplicate-trigger behavior and broader PostgreSQL, Redis, and full-host recovery remain part of the scale and failure-injection milestone.
+
 ## What is left to do
 
-### 1. Create and deploy the staging environment — ⬜ Next milestone
+### 1. Maintain the deployed staging environment — 🟡 Deployed; validation continues
 
-1. Choose a staging host and domain that will never handle real funds.
-2. Configure DNS and HTTPS.
-3. Create the protected GitHub `staging` environment.
-4. Add staging host, SSH, database, encryption, email, and monitoring secrets.
-5. Run the prepared staging deployment workflow.
-6. Confirm database migrations and restricted runtime permissions.
-7. Run a smoke test covering registration, verification, 2FA, funding, orders, fills, cancellation, admin controls, and sign-out.
+1. ✅ AWS EC2 staging host and the `exchange-staging.shopboostlabs.com` domain are running.
+2. ✅ DNS, HTTPS, Docker, Caddy, PostgreSQL, Redis, and the application are operational.
+   - On September 5, 2026, the staging DNS record was corrected from the EC2 private address to Elastic IP `34.200.205.235`.
+   - Caddy was corrected to serve `exchange-staging.shopboostlabs.com` and successfully obtained a publicly trusted certificate.
+   - Public HTTP redirects to HTTPS; `GET /api/health` returns `200 {"status":"ok"}` over verified TLS with the expected baseline security headers.
+3. ✅ Advanced-order migrations and services are deployed.
+4. ✅ Registration, authentication, simulated funding, matching, and stop-loss execution have been exercised on the host.
+5. Confirm the protected GitHub `staging` environment and deployment secrets are complete and current.
+6. ✅ Restricted runtime database permissions were revalidated in production mode: `nexa_app` cannot create schema objects, owns no tables, cannot delete ledger accounts, and cannot update or delete ledger entries, trades, or audit events. It retains the narrow `UPDATE` privilege required for `SELECT ... FOR UPDATE` row locking on ledger accounts, whose immutable trigger still blocks actual changes.
+7. ✅ Complete the remaining smoke test covering 2FA, cancellation, and administrator controls. A disposable-user live exercise confirmed non-admin rejection, protected administrator health access, trading disable/restore, market pause/resume, open-order cancellation, authenticator 2FA enablement, second-factor enforcement at login, and recovery-code login. HTTPS authentication, email verification, password reset, CSRF enforcement, sign-out, and post-logout revocation also pass.
+8. ✅ The application container was rebuilt and deployed with `SES_CONFIGURATION_SET=nexa-transactional`; public HTTPS health returned `200` after the replacement. The previous application container is retained in a stopped state as a short-term rollback until the deployment is accepted.
 
-**Exit condition:** A reproducible simulated staging deployment is reachable over HTTPS and passes its readiness and smoke checks.
+**Exit condition:** The existing simulated staging deployment is reproducible and passes the complete readiness, security, and smoke-test checklist.
 
-### 2. Validate staging security and integrations — ⬜
+### 2. Validate staging security and integrations — 🟡 In progress
 
-1. Verify secure-cookie, CSRF, proxy, and session rotation behavior over real HTTPS.
-2. Send verification and password-reset messages through the selected email provider.
+1. ✅ Verify secure-cookie, CSRF, proxy, and session rotation behavior over real HTTPS. Public TLS, HTTP-to-HTTPS redirection, HSTS, baseline response headers, `Secure`/`HttpOnly`/`SameSite=Strict` cookie flags, missing-CSRF rejection, sign-out, and post-logout revocation are verified. A forced live exercise confirmed that rotation issues a new token, the previous token works only during its grace period, the expired previous token is rejected, the new token remains valid, and logout revokes it.
+2. ✅ Send verification and password-reset messages through the selected email provider. Amazon SES domain verification/DKIM are healthy, the EC2 role has generated `ses:SendEmail` permission, and the application templates passed end-to-end inbox tests. The `nexa-transactional` configuration set now routes bounce and complaint events to the confirmed `nexa-staging-alerts` SNS subscription, with account suppression enabled for both event types. SES production access was denied under case `178864133300316`; request reconsideration with this completed evidence.
 3. Confirm secrets never appear in logs, images, artifacts, or client responses.
 4. Run dependency and container scans on the deployed release.
 5. Verify the API runtime role cannot change permanent financial/audit records.
@@ -182,7 +216,7 @@ The next engineering milestone is not another local feature. It is a controlled 
 
 **Exit condition:** Agreed performance thresholds are met and injected failures do not corrupt orders, trades, or balances.
 
-### 4. Connect monitoring, alerts, and backups — ⬜
+### 4. Connect monitoring, alerts, and backups — 🟡 In progress
 
 1. Connect the protected metrics endpoint to a monitoring service.
 2. Configure alerts for readiness, errors, latency, database, Redis, memory, disk, and backup failures.
@@ -190,6 +224,12 @@ The next engineering milestone is not another local feature. It is a controlled 
 4. Perform and document a staging restore drill.
 5. Define recovery-time and recovery-point objectives.
 6. Write incident-response and rollback runbooks.
+
+Completed evidence:
+
+- ✅ The `nexa-staging-alerts` SNS email subscription is confirmed.
+- ✅ Amazon SES bounce and complaint events are routed through the `nexa-transactional` configuration set to that SNS topic.
+- ✅ SES account-level suppression is enabled for both `BOUNCE` and `COMPLAINT`.
 
 **Exit condition:** Alerts are proven to arrive, backups restore successfully, and recovery ownership is documented.
 
@@ -235,12 +275,11 @@ If a real exchange is pursued, this becomes a separate production program requir
 
 ## Recommended execution order
 
-1. **Deploy simulated staging.**
-2. **Validate HTTPS, email, sessions, and runtime database permissions.**
-3. **Run multi-instance load and failure tests.**
-4. **Connect monitoring and prove encrypted backup restoration.**
-5. **Complete independent security, accessibility, and legal reviews.**
-6. **Decide whether to stop at a polished simulator or fund a separate regulated production program.**
+1. **Validate HTTPS, email, sessions, and runtime database permissions.**
+2. **Run multi-instance load, duplicate-trigger, concurrency, restart, and failure tests.**
+3. **Collect monitoring evidence and repeat the encrypted backup restore drill after Phase 5.**
+4. **Complete independent security, accessibility, and legal reviews.**
+5. **Decide whether to stop at a polished simulator or fund a separate regulated production program.**
 
 ## Production decision gate
 

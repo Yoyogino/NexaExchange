@@ -1,0 +1,7 @@
+{
+  "Enabled": true,
+  "MatchingEventTypes": ["BOUNCE", "COMPLAINT"],
+  "SnsDestination": {
+    "TopicArn": "arn:aws:sns:us-east-1:969325258183:nexa-staging-alerts"
+  }
+}

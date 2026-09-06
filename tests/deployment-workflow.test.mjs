@@ -10,6 +10,9 @@ test("staging deployment is manual, verified, serialized, and environment-protec
   assert.match(workflow, /deploy:\n\s+needs: verify/);
   assert.match(workflow, /environment: staging/);
   assert.match(workflow, /cancel-in-progress: false/);
-  assert.match(workflow, /STAGING_SSH_KNOWN_HOSTS/);
+  assert.match(workflow, /runs-on: \[self-hosted, Linux, X64\]/);
+  assert.doesNotMatch(workflow, /STAGING_SSH_PRIVATE_KEY|STAGING_SSH_KNOWN_HOSTS/);
+  assert.match(workflow, /\/home\/ubuntu\/\.env\.staging/);
+  assert.match(workflow, /id -nG \| grep -qw docker/);
   assert.match(workflow, /api\/ready/);
 });

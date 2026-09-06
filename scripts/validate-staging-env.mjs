@@ -44,8 +44,7 @@ export function validateStagingEnvironment(environment) {
     if (!required(environment, "EMAIL_API_KEY").startsWith("SG.")) throw new Error("SendGrid EMAIL_API_KEY must begin with SG.");
   } else if (provider === "aws-ses") {
     required(environment, "AWS_REGION");
-    required(environment, "AWS_ACCESS_KEY_ID");
-    required(environment, "AWS_SECRET_ACCESS_KEY");
+    required(environment, "SES_CONFIGURATION_SET");
   } else if (provider === "generic") {
     const apiUrl = new URL(required(environment, "EMAIL_API_URL"));
     if (apiUrl.protocol !== "https:") throw new Error("Generic EMAIL_API_URL must use HTTPS.");
