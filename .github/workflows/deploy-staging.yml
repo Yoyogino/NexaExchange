@@ -40,7 +40,7 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm run build
-     - name: Create CI test environment
+- name: Create CI test environment
         run: |
           rm -f .env
           touch .env
