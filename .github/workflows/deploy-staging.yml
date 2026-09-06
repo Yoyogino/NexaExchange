@@ -112,7 +112,7 @@ jobs:
             fi
             exit 1
           fi
-          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=10 --spider http://127.0.0.1:3001/api/ready
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=10 --spider http://127.0.0.1:3000/api/ready
       - name: Run public staging validation and account smoke test
         run: npm run validate:staging
       - name: Remove temporary environment copies
