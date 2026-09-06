@@ -67,6 +67,8 @@ jobs:
           chmod 600 .env.compose
       - name: Deploy and verify readiness
         run: |
+          set -eu
+
           if ! id -nG | grep -qw docker; then
             echo "Runner user must belong to the docker group."
             exit 1
@@ -99,8 +101,7 @@ jobs:
             fi
           done
 
-          if ! docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --build --remove-orphans; then
-            docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml down >/dev/null 2>&1 || true
+          restore_legacy_containers() {
             for container in $legacy_backups; do
               backup="${container}-pre-workflow"
               docker rm -f "$container" >/dev/null 2>&1 || true
@@ -110,9 +111,56 @@ jobs:
             if docker inspect ubuntu-proxy-1 >/dev/null 2>&1; then
               docker restart ubuntu-proxy-1 >/dev/null
             fi
+          }
+
+          previous_app_image=""
+          previous_app_tag=""
+          if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
+            previous_app_image="$(docker inspect --format '{{.Image}}' ubuntu-app-1)"
+            previous_app_tag="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.image"}}' ubuntu-app-1)"
+          fi
+
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml build app migrate
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps postgres redis
+
+          postgres_attempt=0
+          until [ "$(docker inspect --format '{{.State.Health.Status}}' ubuntu-postgres-1 2>/dev/null || true)" = "healthy" ]; do
+            postgres_attempt=$((postgres_attempt + 1))
+            if [ "$postgres_attempt" -ge 30 ]; then
+              docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml logs --tail 100 postgres
+              restore_legacy_containers
+              exit 1
+            fi
+            sleep 2
+          done
+
+          node --env-file=.env.staging scripts/sync-staging-db-role-passwords.mjs
+
+          if ! docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml run --rm migrate; then
+            docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml logs --tail 150 postgres
+            restore_legacy_containers
             exit 1
           fi
-          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=10 --retry-connrefused --spider http://127.0.0.1:3001/api/ready
+
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps app
+
+          app_attempt=0
+          until docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/ready; do
+            app_attempt=$((app_attempt + 1))
+            if [ "$app_attempt" -ge 30 ]; then
+              docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml logs --tail 150 app
+              if [ -n "$previous_app_image" ] && [ -n "$previous_app_tag" ]; then
+                docker tag "$previous_app_image" "$previous_app_tag"
+                docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps --force-recreate app
+              fi
+              restore_legacy_containers
+              exit 1
+            fi
+            sleep 2
+          done
+
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps proxy
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml ps
       - name: Run public staging validation and account smoke test
         run: npm run validate:staging
       - name: Remove temporary environment copies

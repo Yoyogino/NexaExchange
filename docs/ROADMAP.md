@@ -1,9 +1,9 @@
 # Nexa Crypto Exchange — Master Roadmap
 
-**Last reviewed:** 2026-09-05
+**Last reviewed:** 2026-09-06
 
 **Current product:** Simulated BTC/USDT exchange deployed to staging
-**Current validation:** 146 automated checks, TypeScript validation, production web build, public HTTPS health, and SES configuration-set delivery passing
+**Current validation:** CI verification passes (146 active checks, TypeScript validation, production web build, dependency audit, and Compose validation). Public staging is currently unavailable while deployment recovery is in progress.
 **Safety boundary:** The application uses demo funds only. It must not accept deposits, process withdrawals, connect real wallets, custody keys, or move real assets.
 
 ## Status key
@@ -16,13 +16,17 @@
 
 The local simulated exchange is feature-complete for its present scope. Users can register, secure an account, trade simulated BTC/USDT, view balances and activity, and use real-time updates. Administrators can operate the simulated market and inspect activity. Financial mutations use a double-entry ledger and PostgreSQL transactions, and permanent financial/audit records are protected at both trigger and runtime-permission levels.
 
-The simulated exchange is now deployed to a controlled HTTPS staging environment. Phase 5 advanced orders and their single-app failure cases have been verified end-to-end. Transactional email works through Amazon SES with DKIM, bounce/complaint suppression, and SNS alerts; production sending remains blocked pending reconsideration of SES case `178864133300316`. The next engineering milestone is broader staging security and integration validation, followed by scale testing, monitoring evidence, and independent review. A real-money launch is a separate program with substantial legal, compliance, custody, payments, security, and operational requirements.
+The simulated exchange was deployed to a controlled HTTPS staging environment, where Phase 5 advanced orders and their single-app failure cases were verified end-to-end. Transactional email works through Amazon SES with DKIM, bounce/complaint suppression, and SNS alerts; production sending remains blocked pending reconsideration of SES case `178864133300316`.
+
+The staging deployment is presently in recovery. GitHub pull requests #5 through #8 are merged and the verification job passes, but deployment run #6 failed during the database migration. The preserved PostgreSQL data volume was successfully adopted, then the application failed authentication because its protected environment passwords no longer matched the existing `nexa_app` and `nexa_migrator` database roles. The failed rollback also removed the Compose network. On 2026-09-06, the public HTTPS endpoint refused connections, and the local AWS session had expired, preventing a fresh EC2/container check. No real funds are involved.
 
 ## Immediate next actions
 
-1. Request reconsideration of denied Amazon SES production-access case `178864133300316`, citing the now-active bounce/complaint suppression and SNS event destination.
-2. Confirm the protected GitHub `staging` environment and deployment secrets, then exercise the deployment workflow.
-3. Run dependency and container scans against the deployed release.
+1. Reauthenticate the `shopboostlabs` AWS CLI session and verify EC2, the self-hosted runner, containers, networks, volumes, and temporary SSH rules.
+2. Synchronize the existing `nexa_app` and `nexa_migrator` PostgreSQL role passwords with `/home/ubuntu/.env.staging` without printing secrets, then restore app/proxy readiness using the preserved volume.
+3. Capture and correct the migration failure, then harden rollback so a failed deployment cannot remove the working network or strand services.
+4. Run a fresh `main` deployment and require verification, migration, readiness, public HTTPS, and authenticated smoke tests to pass.
+5. Continue monitoring SES case `178864133300316`; do not submit duplicate requests.
 
 ## Roadmap from the beginning
 
@@ -179,19 +183,23 @@ The simulated exchange is now deployed to a controlled HTTPS staging environment
 
 ## What is left to do
 
-### 1. Maintain the deployed staging environment — 🟡 Deployed; validation continues
+### 1. Recover and stabilize the staging environment — 🟡 Active incident
 
-1. ✅ AWS EC2 staging host and the `exchange-staging.shopboostlabs.com` domain are running.
-2. ✅ DNS, HTTPS, Docker, Caddy, PostgreSQL, Redis, and the application are operational.
+1. ✅ AWS EC2 staging host, Elastic IP, DNS, HTTPS, Docker, Caddy, PostgreSQL, Redis, and the application were originally deployed and validated.
+2. 🔴 Public staging is currently unavailable: `https://exchange-staging.shopboostlabs.com/api/health` refused connections on 2026-09-06.
    - On September 5, 2026, the staging DNS record was corrected from the EC2 private address to Elastic IP `34.200.205.235`.
    - Caddy was corrected to serve `exchange-staging.shopboostlabs.com` and successfully obtained a publicly trusted certificate.
    - Public HTTP redirects to HTTPS; `GET /api/health` returns `200 {"status":"ok"}` over verified TLS with the expected baseline security headers.
 3. ✅ Advanced-order migrations and services are deployed.
 4. ✅ Registration, authentication, simulated funding, matching, and stop-loss execution have been exercised on the host.
-5. Confirm the protected GitHub `staging` environment and deployment secrets are complete and current.
-6. ✅ Restricted runtime database permissions were revalidated in production mode: `nexa_app` cannot create schema objects, owns no tables, cannot delete ledger accounts, and cannot update or delete ledger entries, trades, or audit events. It retains the narrow `UPDATE` privilege required for `SELECT ... FOR UPDATE` row locking on ledger accounts, whose immutable trigger still blocks actual changes.
-7. ✅ Complete the remaining smoke test covering 2FA, cancellation, and administrator controls. A disposable-user live exercise confirmed non-admin rejection, protected administrator health access, trading disable/restore, market pause/resume, open-order cancellation, authenticator 2FA enablement, second-factor enforcement at login, and recovery-code login. HTTPS authentication, email verification, password reset, CSRF enforcement, sign-out, and post-logout revocation also pass.
-8. ✅ The application container was rebuilt and deployed with `SES_CONFIGURATION_SET=nexa-transactional`; public HTTPS health returned `200` after the replacement. The previous application container is retained in a stopped state as a short-term rollback until the deployment is accepted.
+5. ✅ Protected GitHub `staging` deployment and self-hosted runner were configured; PRs #5–#8 are merged, and the current verification job passes.
+6. ✅ The original PostgreSQL data volume was identified and preserved during Compose adoption.
+7. 🔴 Deployment run #6 failed at migration; the replacement application then reported PostgreSQL password authentication failure for `nexa_app`.
+8. 🟡 Reauthenticate AWS CLI, inspect the live host, synchronize database role passwords, restore the application, and verify public readiness.
+9. 🟡 Update the workflow to start dependencies first, synchronize roles safely, run migrations with captured logs, and perform a non-destructive rollback.
+10. Run a fresh deployment from `main` and retain the exact successful run link as evidence.
+11. ✅ Restricted runtime database permissions were previously revalidated in production mode: `nexa_app` cannot create schema objects, owns no tables, cannot delete ledger accounts, and cannot update or delete ledger entries, trades, or audit events. It retains the narrow `UPDATE` privilege required for row locking, whose immutable trigger still blocks actual changes.
+12. ✅ A previous staging smoke test covered 2FA, cancellation, administrator controls, HTTPS authentication, email verification, password reset, CSRF, sign-out, and session revocation. Repeat the critical smoke test after recovery.
 
 **Exit condition:** The existing simulated staging deployment is reproducible and passes the complete readiness, security, and smoke-test checklist.
 
@@ -275,11 +283,13 @@ If a real exchange is pursued, this becomes a separate production program requir
 
 ## Recommended execution order
 
-1. **Validate HTTPS, email, sessions, and runtime database permissions.**
-2. **Run multi-instance load, duplicate-trigger, concurrency, restart, and failure tests.**
-3. **Collect monitoring evidence and repeat the encrypted backup restore drill after Phase 5.**
-4. **Complete independent security, accessibility, and legal reviews.**
-5. **Decide whether to stop at a polished simulator or fund a separate regulated production program.**
+1. **Recover staging without replacing or deleting the preserved PostgreSQL data volume.**
+2. **Make CI/CD deployment and rollback reproducible, then prove a clean deployment from `main`.**
+3. **Revalidate HTTPS, email, sessions, runtime database permissions, and the complete smoke test.**
+4. **Run multi-instance load, duplicate-trigger, concurrency, restart, and failure tests.**
+5. **Collect monitoring evidence and complete an encrypted backup restore drill.**
+6. **Complete independent security, accessibility, and Canadian legal reviews.**
+7. **Select custody/key-management and regulatory operating partners before any real-money work.**
 
 ## Production decision gate
 
