@@ -16,25 +16,28 @@ const account = {
 };
 
 function readOnlyResponse(path) {
-  if (path === "/api/me") return response(200, account, ["nexa_session=rotated; Path=/; HttpOnly", "nexa_csrf=csrf-rotated; Path=/"]);
+  if (path === "/api/me") return response(200, account, ["nexa_session=rotated; Path=/; Secure; HttpOnly; SameSite=Strict", "nexa_csrf=csrf-rotated; Path=/; Secure; SameSite=Strict"]);
   if (["/api/market", "/api/orders", "/api/trades"].includes(path)) return response(200);
   return null;
 }
 
 test("staging smoke check registers once and follows rotated session cookies", async () => {
   const calls = [];
+  let loggedOut = false;
   const fetchImpl = async (url, options) => {
     const path = new URL(url).pathname;
     calls.push({ path, options });
-    if (path === "/api/auth/register") return response(201, account, ["nexa_session=initial; Path=/; HttpOnly", "nexa_csrf=csrf-initial; Path=/"]);
+    if (path === "/api/auth/register") return response(201, account, ["nexa_session=initial; Path=/; Secure; HttpOnly; SameSite=Strict", "nexa_csrf=csrf-initial; Path=/; Secure; SameSite=Strict"]);
+    if (path === "/api/me" && loggedOut) return response(401);
     const readOnly = readOnlyResponse(path);
     if (readOnly) return readOnly;
-    if (path === "/api/auth/logout") return response(204);
+    if (path === "/api/auth/logout" && !options.headers["x-csrf-token"]) return response(403);
+    if (path === "/api/auth/logout") { loggedOut = true; return response(204); }
     throw new Error(`Unexpected request: ${path}`);
   };
 
   await runStagingSmoke({ baseUrl: "https://staging.example.test/", email: "smoke@example.test", password: "long-smoke-password", fetchImpl });
-  const logout = calls.find((call) => call.path === "/api/auth/logout");
+  const logout = calls.find((call) => call.path === "/api/auth/logout" && call.options.headers["x-csrf-token"]);
   assert.equal(logout.options.headers["x-csrf-token"], "csrf-rotated");
   assert.match(logout.options.headers.cookie, /nexa_session=rotated/);
   assert.equal(calls.some((call) => call.path === "/api/auth/login"), false);
@@ -42,14 +45,17 @@ test("staging smoke check registers once and follows rotated session cookies", a
 
 test("staging smoke check signs into its existing dedicated account", async () => {
   const calls = [];
+  let loggedOut = false;
   const fetchImpl = async (url, options) => {
     const path = new URL(url).pathname;
     calls.push(path);
     if (path === "/api/auth/register") return response(409);
-    if (path === "/api/auth/login") return response(200, account, ["nexa_session=existing; Path=/; HttpOnly", "nexa_csrf=existing-csrf; Path=/"]);
+    if (path === "/api/auth/login") return response(200, account, ["nexa_session=existing; Path=/; Secure; HttpOnly; SameSite=Strict", "nexa_csrf=existing-csrf; Path=/; Secure; SameSite=Strict"]);
+    if (path === "/api/me" && loggedOut) return response(401);
     const readOnly = readOnlyResponse(path);
     if (readOnly) return readOnly;
-    if (path === "/api/auth/logout") return response(204);
+    if (path === "/api/auth/logout" && !options.headers["x-csrf-token"]) return response(403);
+    if (path === "/api/auth/logout") { loggedOut = true; return response(204); }
     throw new Error(`Unexpected request: ${path}`);
   };
 

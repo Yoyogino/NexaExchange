@@ -38,4 +38,12 @@ test("staging preflight rejects placeholders, reused passwords, and malformed ke
 test("staging preflight enforces provider-specific email configuration", () => {
   assert.throws(() => validateStagingEnvironment({ ...valid, EMAIL_API_KEY: "wrong" }), /SendGrid/);
   assert.throws(() => validateStagingEnvironment({ ...valid, EMAIL_PROVIDER: "generic", EMAIL_API_URL: "http://mail.nexa.test" }), /HTTPS/);
+  const ses = {
+    ...valid,
+    EMAIL_PROVIDER: "aws-ses",
+    AWS_REGION: "us-east-1",
+    SES_CONFIGURATION_SET: "nexa-transactional",
+  };
+  assert.doesNotThrow(() => validateStagingEnvironment(ses));
+  assert.throws(() => validateStagingEnvironment({ ...ses, SES_CONFIGURATION_SET: "" }), /SES_CONFIGURATION_SET/);
 });

@@ -1,0 +1,38 @@
+{
+  "Version": "2012-10-17",
+  "Id": "nexa-staging-alerts-policy",
+  "Statement": [
+    {
+      "Sid": "OwnerAdministration",
+      "Effect": "Allow",
+      "Principal": { "AWS": "*" },
+      "Action": [
+        "SNS:GetTopicAttributes",
+        "SNS:SetTopicAttributes",
+        "SNS:AddPermission",
+        "SNS:RemovePermission",
+        "SNS:DeleteTopic",
+        "SNS:Subscribe",
+        "SNS:ListSubscriptionsByTopic",
+        "SNS:Publish"
+      ],
+      "Resource": "arn:aws:sns:us-east-1:969325258183:nexa-staging-alerts",
+      "Condition": {
+        "StringEquals": { "AWS:SourceOwner": "969325258183" }
+      }
+    },
+    {
+      "Sid": "AllowSesConfigurationSetEvents",
+      "Effect": "Allow",
+      "Principal": { "Service": "ses.amazonaws.com" },
+      "Action": "SNS:Publish",
+      "Resource": "arn:aws:sns:us-east-1:969325258183:nexa-staging-alerts",
+      "Condition": {
+        "StringEquals": { "AWS:SourceAccount": "969325258183" },
+        "ArnEquals": {
+          "AWS:SourceArn": "arn:aws:ses:us-east-1:969325258183:configuration-set/nexa-transactional"
+        }
+      }
+    }
+  ]
+}

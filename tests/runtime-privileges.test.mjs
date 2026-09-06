@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { assertRestrictedRuntimePrivileges, IMMUTABLE_RUNTIME_TABLES, restrictRuntimePrivileges } from "../server/runtime-privileges.mjs";
+import { assertRestrictedRuntimePrivileges, IMMUTABLE_RUNTIME_TABLES, LOCK_ONLY_RUNTIME_TABLES, restrictRuntimePrivileges } from "../server/runtime-privileges.mjs";
 
 test("staging runtime role cannot rewrite permanent financial or audit records", async () => {
   const queries = [];
@@ -12,10 +12,12 @@ test("staging runtime role cannot rewrite permanent financial or audit records",
     },
   };
   assert.equal(await restrictRuntimePrivileges(pool), true);
-  assert.equal(queries.length, 2);
+  assert.equal(queries.length, 3);
   assert.match(queries[1], /^REVOKE UPDATE, DELETE ON TABLE /);
   assert.match(queries[1], / FROM nexa_app$/);
   for (const table of IMMUTABLE_RUNTIME_TABLES) assert.match(queries[1], new RegExp(`\\b${table}\\b`));
+  assert.match(queries[2], /^REVOKE DELETE ON TABLE /);
+  for (const table of LOCK_ONLY_RUNTIME_TABLES) assert.match(queries[2], new RegExp(`\\b${table}\\b`));
 });
 
 test("production startup accepts only the restricted application role", async () => {

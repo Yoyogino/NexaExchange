@@ -45,43 +45,52 @@ jobs:
 
   deploy:
     needs: verify
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64]
     timeout-minutes: 20
     environment: staging
-    env:
-      STAGING_HOST: ${{ secrets.STAGING_HOST }}
-      STAGING_USER: ${{ secrets.STAGING_USER }}
-      STAGING_ENV_FILE: ${{ secrets.STAGING_ENV_FILE }}
     steps:
       - uses: actions/checkout@v6
-      - name: Configure verified SSH access
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Load and validate protected host environment
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/id_ed25519
-          chmod 600 ~/.ssh/id_ed25519
-          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
-          chmod 600 ~/.ssh/known_hosts
-      - name: Transfer release files
-        run: |
-          tar --exclude=.git --exclude=node_modules --exclude=dist --exclude=.env --exclude=.local-secrets --exclude=backups -czf - . \
-            | ssh "$STAGING_USER@$STAGING_HOST" 'mkdir -p ~/nexa-exchange-staging && tar -xzf - -C ~/nexa-exchange-staging'
-      - name: Install protected staging environment
-        run: |
-          printf '%s' "$STAGING_ENV_FILE" | base64 -w0 \
-            | ssh "$STAGING_USER@$STAGING_HOST" 'base64 -d > ~/nexa-exchange-staging/.env.staging && chmod 600 ~/nexa-exchange-staging/.env.staging'
-          printf '%s' "$STAGING_ENV_FILE" > .env.staging
+          test -f /home/ubuntu/.env.staging
+          install -m 600 /home/ubuntu/.env.staging .env.staging
           node --env-file=.env.staging scripts/validate-staging-env.mjs
-          rm .env.staging
+          sed 's/\$/$$/g' .env.staging > .env.compose
+          chmod 600 .env.compose
       - name: Deploy and verify readiness
         run: |
-          ssh "$STAGING_USER@$STAGING_HOST" 'cd ~/nexa-exchange-staging && docker compose --env-file .env.staging -f compose.staging.yml config --quiet && docker compose --env-file .env.staging -f compose.staging.yml up -d --build --remove-orphans'
-          sleep 10
-          ssh "$STAGING_USER@$STAGING_HOST" 'cd ~/nexa-exchange-staging && docker compose --env-file .env.staging -f compose.staging.yml exec -T app wget --no-verbose --tries=10 --retry-connrefused --spider http://127.0.0.1:3001/api/ready'
+          if ! id -nG | grep -qw docker; then
+            echo "Runner user must belong to the docker group."
+            exit 1
+          fi
+          legacy_backup=""
+          if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
+            compose_project="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.project"}}' ubuntu-app-1)"
+            if [ "$compose_project" != "ubuntu" ]; then
+              legacy_backup="ubuntu-app-1-pre-workflow"
+              docker rm -f "$legacy_backup" >/dev/null 2>&1 || true
+              docker stop ubuntu-app-1 >/dev/null
+              docker rename ubuntu-app-1 "$legacy_backup"
+            fi
+          fi
+          if ! docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --build --remove-orphans; then
+            docker rm -f ubuntu-app-1 >/dev/null 2>&1 || true
+            if [ -n "$legacy_backup" ]; then
+              docker rename "$legacy_backup" ubuntu-app-1
+              docker start ubuntu-app-1 >/dev/null
+              docker restart ubuntu-proxy-1 >/dev/null
+            fi
+            exit 1
+          fi
+          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=10 --retry-connrefused --spider http://127.0.0.1:3001/api/ready
       - name: Run public staging validation and account smoke test
-        run: |
-          trap 'rm -f .env.staging' EXIT
-          printf '%s' "$STAGING_ENV_FILE" > .env.staging
-          npm run validate:staging
+        run: npm run validate:staging
+      - name: Remove temporary environment copies
+        if: always()
+        run: rm -f .env.staging .env.compose

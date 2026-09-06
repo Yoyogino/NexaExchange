@@ -57,10 +57,20 @@ async function tick(pool, events) {
         }
         if (!triggered) continue;
         const { advancedOrder, placedOrder } = await executeAdvancedOrder(pool, current);
-        totalTriggered += 1;
         affectedUserIds.add(order.user_id);
         for (const uid of placedOrder.affectedUserIds ?? []) affectedUserIds.add(uid);
-        log("advanced_order_triggered", { orderId: advancedOrder.id, orderType: advancedOrder.order_type, userId: order.user_id, fillPrice: advancedOrder.fill_price });
+        if (advancedOrder.status === "FAILED") {
+          log("advanced_order_execution_failed", {
+            orderId: advancedOrder.id,
+            orderType: advancedOrder.order_type,
+            userId: order.user_id,
+            placedOrderId: placedOrder.orderId,
+            reason: "NO_LIQUIDITY",
+          });
+        } else {
+          totalTriggered += 1;
+          log("advanced_order_triggered", { orderId: advancedOrder.id, orderType: advancedOrder.order_type, userId: order.user_id, fillPrice: advancedOrder.fill_price });
+        }
       } catch (error) {
         log("advanced_order_execution_failed", { orderId: order.id, message: error.message });
       }

@@ -9,7 +9,7 @@ import { getEmailProvider } from "../email-providers/index.mjs";
 const recipient = process.argv[2] || "test@example.com";
 const provider = getEmailProvider();
 
-console.log("📧 Sending test email...");
+console.log("Sending test email...");
 console.log(`   Provider:  ${process.env.EMAIL_PROVIDER || "auto-detect"}`);
 console.log(`   From:      ${process.env.EMAIL_FROM || "demo@example.com"}`);
 console.log(`   To:        ${recipient}`);
@@ -40,14 +40,14 @@ If you received this email, your email configuration is working correctly!`,
     `,
   });
 
-  console.log("✅ Email sent successfully!");
+  console.log("Email sent successfully.");
   console.log();
   console.log("Response:");
   console.log(JSON.stringify(result, null, 2));
   console.log();
   console.log("Check your inbox (and spam folder) for the test email.");
 } catch (error) {
-  console.error("❌ Failed to send email:");
+  console.error("Failed to send email:");
   console.error(error.message);
   process.exit(1);
 }
