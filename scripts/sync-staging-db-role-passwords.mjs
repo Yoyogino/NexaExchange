@@ -23,9 +23,17 @@ const owner = inspect.stdout
   .split(/\r?\n/u)
   .find((entry) => entry.startsWith("POSTGRES_USER="))
   ?.slice("POSTGRES_USER=".length);
-if (!owner || !/^[a-z_][a-z0-9_]*$/u.test(owner)) {
-  throw new Error("Unable to identify a safe PostgreSQL owner role from the running container.");
-}
+const ownerCandidates = [...new Set([owner, "exchange_owner", "exchange", "postgres"])]
+  .filter((candidate) => candidate && /^[a-z_][a-z0-9_]*$/u.test(candidate));
+const activeOwner = ownerCandidates.find((candidate) => {
+  const probe = spawnSync(
+    "docker",
+    ["exec", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", candidate, "-d", "exchange", "-Atqc", "SELECT current_user"],
+    { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
+  );
+  return !probe.error && probe.status === 0 && probe.stdout.trim() === candidate;
+});
+if (!activeOwner) throw new Error("Unable to connect using a known PostgreSQL owner role.");
 const sql = [
   `ALTER ROLE nexa_app PASSWORD ${sqlLiteral(appPassword)};`,
   `ALTER ROLE nexa_migrator PASSWORD ${sqlLiteral(migrationPassword)};`,
@@ -34,7 +42,7 @@ const sql = [
 
 const result = spawnSync(
   "docker",
-  ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", owner, "-d", "exchange"],
+  ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", activeOwner, "-d", "exchange"],
   { input: sql, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] },
 );
 
