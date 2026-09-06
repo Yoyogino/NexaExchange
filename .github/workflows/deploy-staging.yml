@@ -40,6 +40,8 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm run build
+      - name: Create CI test environment
+        run: cp .env.example .env
       - run: npm test
       - run: docker compose --env-file .env.staging.example -f compose.staging.yml config --quiet
 
