@@ -40,7 +40,7 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm run build
-      -- name: Create CI test environment
+     - name: Create CI test environment
         run: |
           rm -f .env
           touch .env
@@ -51,6 +51,7 @@ jobs:
           echo "POSTGRES_PASSWORD=exchange_dev_password" >> .env
           echo "POSTGRES_APP_PASSWORD=secure_app_password_123" >> .env
           echo "POSTGRES_MIGRATION_PASSWORD=secure_migration_password_123" >> .env
+          echo "DATABASE_URL=postgres://app_user:secure_app_password_123@postgres:5432/exchange_staging" >> .env
           echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
           echo "BACKUP_ENCRYPTION_KEY=aUg9eY9GhkzVsfyNmn0FK2v/EJ9jdsjUPWhQfzMKlc8=" >> .env
           echo "MONITORING_TOKEN=c02d821f0775b1a414fda6489011e3d1" >> .env
