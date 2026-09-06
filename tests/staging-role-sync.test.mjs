@@ -7,6 +7,7 @@ const script = await readFile(new URL("../scripts/sync-staging-db-role-passwords
 test("staging role synchronization supports preserved databases with legacy owners", () => {
   assert.match(script, /"exchange_owner", "exchange", "postgres"/);
   assert.match(script, /SELECT current_user/);
+  assert.match(script, /"-d", "postgres"/);
   assert.match(script, /probe\.status === 0/);
   assert.match(script, /ALTER ROLE nexa_app PASSWORD/);
   assert.match(script, /ALTER ROLE nexa_migrator PASSWORD/);

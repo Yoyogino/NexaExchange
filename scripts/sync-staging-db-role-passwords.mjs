@@ -28,7 +28,7 @@ const ownerCandidates = [...new Set([owner, "exchange_owner", "exchange", "postg
 const activeOwner = ownerCandidates.find((candidate) => {
   const probe = spawnSync(
     "docker",
-    ["exec", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", candidate, "-d", "exchange", "-Atqc", "SELECT current_user"],
+    ["exec", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", candidate, "-d", "postgres", "-Atqc", "SELECT current_user"],
     { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   return !probe.error && probe.status === 0 && probe.stdout.trim() === candidate;
@@ -42,7 +42,7 @@ const sql = [
 
 const result = spawnSync(
   "docker",
-  ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", activeOwner, "-d", "exchange"],
+  ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", activeOwner, "-d", "postgres"],
   { input: sql, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] },
 );
 
