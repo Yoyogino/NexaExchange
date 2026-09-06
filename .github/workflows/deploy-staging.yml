@@ -41,7 +41,13 @@ jobs:
       - run: npm run typecheck
       - run: npm run build
       - name: Create CI test environment
-        run: cp .env.example .env
+        run: |
+          cp .env.example .env
+          echo "STAGING_DOMAIN=localhost" >> .env
+          echo "POSTGRES_APP_PASSWORD=exchange_dev_password" >> .env
+          echo "POSTGRES_MIGRATION_PASSWORD=exchange_dev_password" >> .env
+          echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
+          echo "BACKUP_ENCRYPTION_KEY=aUg9eY9GhkzVsfyNmn0FK2v/EJ9jdsjUPWhQfzMKlc8=" >> .env
       - run: npm test
       - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
 
