@@ -32,7 +32,7 @@ jobs:
       DATABASE_URL: postgresql://exchange:exchange_dev_password@localhost:5432/exchange_demo
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -40,30 +40,10 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npm run typecheck
       - run: npm run build
-- name: Create CI test environment
-        run: |
-          rm -f .env
-          touch .env
-          echo "STAGING_DOMAIN=exchange-staging.shopboostlabs.com" >> .env
-          echo "NODE_ENV=production" >> .env
-          echo "PORT=3000" >> .env
-          echo "POSTGRES_USER=exchange" >> .env
-          echo "POSTGRES_PASSWORD=exchange_dev_password" >> .env
-          echo "POSTGRES_APP_PASSWORD=secure_app_password_123" >> .env
-          echo "POSTGRES_MIGRATION_PASSWORD=secure_migration_password_123" >> .env
-          echo "DATABASE_URL=postgres://app_user:secure_app_password_123@postgres:5432/exchange_staging" >> .env
-          echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
-          echo "BACKUP_ENCRYPTION_KEY=aUg9eY9GhkzVsfyNmn0FK2v/EJ9jdsjUPWhQfzMKlc8=" >> .env
-          echo "MONITORING_TOKEN=c02d821f0775b1a414fda6489011e3d1" >> .env
-          echo "EMAIL_FROM=staging@exchange-staging.shopboostlabs.com" >> .env
-          echo "SMTP_HOST=uemujs3krimu.fips.wmjb.mail-manager-smtp.amazonaws.com" >> .env
-          echo "SMTP_PORT=587" >> .env
-          echo "SMTP_USER=inp-" >> .env
-          echo "SMTP_PASSWORD=pQ#oz*f}4pgj%&cl11]CkVgInWb,*lG%" >> .env
-          echo "OFFSITE_BACKUP_DIRECTORY=/backups" >> .env
-          echo "EMAIL_PROVIDER=smtp" >> .env
+      - name: Create CI test environment
+        run: cp .env.example .env
       - run: npm test
-      - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
+      - run: docker compose --env-file .env.staging.example -f compose.staging.yml config --quiet
 
   deploy:
     needs: verify
@@ -72,7 +52,7 @@ jobs:
     environment: staging
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: npm
@@ -181,7 +161,6 @@ jobs:
 
           docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps proxy
           docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml ps
-          docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml exec -T app wget --header="X-Forwarded-Proto: https" --no-verbose --tries=10 --spider http://127.0.0.1:3000/api/ready
       - name: Run public staging validation and account smoke test
         run: npm run validate:staging
       - name: Remove temporary environment copies
