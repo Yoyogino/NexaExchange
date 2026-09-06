@@ -51,13 +51,13 @@ jobs:
           echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
           echo "BACKUP_ENCRYPTION_KEY=aUg9eY9GhkzVsfyNmn0FK2v/EJ9jdsjUPWhQfzMKlc8=" >> .env
           echo "MONITORING_TOKEN=c02d821f0775b1a414fda6489011e3d1" >> .env
-          echo "EMAIL_FROM=staging@exchange-staging.shopboostlabs.com" >> .env
+          echo "EMAIL_FROM=staging@example.com" >> .env
           echo "SMTP_HOST=localhost" >> .env
           echo "SMTP_PORT=587" >> .env
           echo "SMTP_USER=dummy" >> .env
           echo "SMTP_PASSWORD=dummy" >> .env
           echo "OFFSITE_BACKUP_DIRECTORY=/backups" >> .env
-          echo "EMAIL_PROVIDER=smtp" >> .env
+          echo "EMAIL_PROVIDER=generic" >> .env
       - run: npm test
       - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
 
