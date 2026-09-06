@@ -7,7 +7,7 @@ const workflow = await readFile(new URL("../.github/workflows/deploy-staging.yml
 test("staging deployment is manual, verified, serialized, and environment-protected", () => {
   assert.match(workflow, /workflow_dispatch:/);
   assert.doesNotMatch(workflow, /\n\s+push:/);
-  assert.match(workflow, /deploy:\n\s+needs: verify/);
+  assert.match(workflow, /deploy:\r?\n\s+needs: verify/);
   assert.match(workflow, /environment: staging/);
   assert.match(workflow, /cancel-in-progress: false/);
   assert.match(workflow, /cp \.env\.example \.env/);
