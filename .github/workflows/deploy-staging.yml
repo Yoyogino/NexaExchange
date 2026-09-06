@@ -44,6 +44,8 @@ jobs:
         run: |
           cp .env.example .env
           echo "STAGING_DOMAIN=localhost" >> .env
+          echo "POSTGRES_USER=exchange" >> .env
+          echo "POSTGRES_PASSWORD=exchange_dev_password" >> .env
           echo "POSTGRES_APP_PASSWORD=exchange_dev_password" >> .env
           echo "POSTGRES_MIGRATION_PASSWORD=exchange_dev_password" >> .env
           echo "DATA_ENCRYPTION_KEY=dPUHKCGXg2p4GMBhSGro1RiAWQrzyrlNWf6MiDBMME0=" >> .env
@@ -56,7 +58,6 @@ jobs:
           echo "SMTP_PASSWORD=dummy" >> .env
           echo "OFFSITE_BACKUP_DIRECTORY=/backups" >> .env
           echo "EMAIL_PROVIDER=smtp" >> .env
-      - 
       - run: npm test
       - run: docker compose --env-file .env -f docker-compose.yml -f compose.staging.yml up -d
 
