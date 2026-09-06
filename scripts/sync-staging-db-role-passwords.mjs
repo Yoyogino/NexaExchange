@@ -34,13 +34,34 @@ const activeOwner = ownerCandidates.find((candidate) => {
   return !probe.error && probe.status === 0 && probe.stdout.trim() === candidate;
 });
 if (!activeOwner) throw new Error("Unable to connect using a known PostgreSQL owner role.");
-const sql = [
+
+function runSql(database, sql) {
+  const result = spawnSync(
+    "docker",
+    ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", activeOwner, "-d", database],
+    { input: sql, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] },
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+const globalSql = [
   `SELECT format('CREATE ROLE nexa_app LOGIN PASSWORD %L', ${sqlLiteral(appPassword)})`,
   "WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_app') \\gexec",
   `SELECT format('CREATE ROLE nexa_migrator LOGIN PASSWORD %L', ${sqlLiteral(migrationPassword)})`,
   "WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'nexa_migrator') \\gexec",
   `ALTER ROLE nexa_app PASSWORD ${sqlLiteral(appPassword)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;`,
   `ALTER ROLE nexa_migrator PASSWORD ${sqlLiteral(migrationPassword)} NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;`,
+  "SELECT 'ALTER DATABASE exchange_demo RENAME TO exchange'",
+  "WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'exchange')",
+  "AND EXISTS (SELECT 1 FROM pg_database WHERE datname = 'exchange_demo') \\gexec",
+  "SELECT 'CREATE DATABASE exchange OWNER nexa_migrator'",
+  "WHERE NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = 'exchange') \\gexec",
+  "",
+].join("\n");
+runSql("postgres", globalSql);
+
+const databaseSql = [
   "GRANT CONNECT ON DATABASE exchange TO nexa_app;",
   "GRANT CONNECT ON DATABASE exchange TO nexa_migrator;",
   ...(activeOwner === "postgres" ? [] : [`REASSIGN OWNED BY ${activeOwner} TO nexa_migrator;`]),
@@ -53,13 +74,5 @@ const sql = [
   "ALTER DEFAULT PRIVILEGES FOR ROLE nexa_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO nexa_app;",
   "",
 ].join("\n");
-
-const result = spawnSync(
-  "docker",
-  ["exec", "-i", "ubuntu-postgres-1", "psql", "-v", "ON_ERROR_STOP=1", "-U", activeOwner, "-d", "exchange"],
-  { input: sql, encoding: "utf8", stdio: ["pipe", "inherit", "inherit"] },
-);
-
-if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);
+runSql("exchange", databaseSql);
 console.log("Staging database role passwords synchronized.");
