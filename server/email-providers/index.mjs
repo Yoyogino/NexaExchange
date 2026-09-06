@@ -29,7 +29,12 @@ export function getEmailProvider(options = {}) {
       return createSendGridAdapter({ apiKey, from, fetchImpl });
 
     case "aws-ses":
-      return createAwsSesAdapter({ region: options.region, accessKeyId: options.accessKeyId, secretAccessKey: options.secretAccessKey, from, fetchImpl });
+      return createAwsSesAdapter({
+        region: options.region,
+        from,
+        configurationSetName: options.configurationSetName,
+        client: options.client,
+      });
 
     case "generic":
     case undefined:

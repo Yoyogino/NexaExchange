@@ -59,30 +59,25 @@ test("SendGrid adapter parses email name and address", async () => {
   }
 });
 
-test("AWS SES adapter is instantiable with credentials", async () => {
-  // Note: Full SES signature testing is complex; this just verifies instantiation
+test("AWS SES adapter uses the SDK client and default credential chain", async () => {
+  let input;
   const adapter = createAwsSesAdapter({
     region: "us-east-1",
-    accessKeyId: "AKIA1234567890ABCDEF",
-    secretAccessKey: "test-secret-key",
     from: "security@example.com",
+    configurationSetName: "nexa-transactional",
+    client: { async send(command) { input = command.input; return { MessageId: "ses-123" }; } },
   });
 
-  assert.ok(adapter.send, "Adapter should have send method");
+  const result = await adapter.send({ to: "user@example.com", subject: "Test", text: "Message" });
+  assert.equal(input.Source, "security@example.com");
+  assert.deepEqual(input.Destination.ToAddresses, ["user@example.com"]);
+  assert.equal(input.Message.Subject.Data, "Test");
+  assert.equal(input.ConfigurationSetName, "nexa-transactional");
+  assert.equal(result.messageId, "ses-123");
 });
 
-test("AWS SES adapter throws on missing credentials", async () => {
-  assert.throws(() => createAwsSesAdapter({ from: "test@example.com" }), /AWS_ACCESS_KEY_ID/);
-
-  assert.throws(
-    () => createAwsSesAdapter({ accessKeyId: "AKIA...", from: "test@example.com" }),
-    /AWS_SECRET_ACCESS_KEY/,
-  );
-
-  assert.throws(
-    () => createAwsSesAdapter({ accessKeyId: "AKIA...", secretAccessKey: "secret" }),
-    /EMAIL_FROM/,
-  );
+test("AWS SES adapter throws on missing sender", async () => {
+  assert.throws(() => createAwsSesAdapter({ from: "" }), /EMAIL_FROM/);
 });
 
 test("Email provider factory auto-detects SendGrid by API key prefix", async () => {
@@ -119,8 +114,6 @@ test("Email provider factory respects explicit provider choice", async () => {
         provider: providerName,
         apiKey: "test-key",
         from: "test@example.com",
-        accessKeyId: "AKIA123", // For AWS SES
-        secretAccessKey: "secret", // For AWS SES
         apiUrl: "https://api.example.com/send", // For generic
       });
     }, `Should instantiate ${providerName} provider`);

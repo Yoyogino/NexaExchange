@@ -1,3 +1,5 @@
+import { pathToFileURL } from "node:url";
+
 function required(environment, name) {
   const value = String(environment[name] ?? "").trim();
   if (!value) throw new Error(`${name} is required.`);
@@ -44,8 +46,7 @@ export function validateStagingEnvironment(environment) {
     if (!required(environment, "EMAIL_API_KEY").startsWith("SG.")) throw new Error("SendGrid EMAIL_API_KEY must begin with SG.");
   } else if (provider === "aws-ses") {
     required(environment, "AWS_REGION");
-    required(environment, "AWS_ACCESS_KEY_ID");
-    required(environment, "AWS_SECRET_ACCESS_KEY");
+    required(environment, "SES_CONFIGURATION_SET");
   } else if (provider === "generic") {
     const apiUrl = new URL(required(environment, "EMAIL_API_URL"));
     if (apiUrl.protocol !== "https:") throw new Error("Generic EMAIL_API_URL must use HTTPS.");
@@ -57,7 +58,7 @@ export function validateStagingEnvironment(environment) {
   return { domain, provider, smokeEmail };
 }
 
-if (process.argv[1] && import.meta.url === new URL(`file:///${process.argv[1].replace(/\\/g, "/")}`).href) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const result = validateStagingEnvironment(process.env);
   console.log(`Staging environment preflight passed for ${result.domain} using ${result.provider}.`);
 }

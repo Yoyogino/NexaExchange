@@ -1,9 +1,11 @@
-export const IMMUTABLE_RUNTIME_TABLES = ["ledger_entries", "ledger_accounts", "audit_events", "trades"];
+export const IMMUTABLE_RUNTIME_TABLES = ["ledger_entries", "audit_events", "trades"];
+export const LOCK_ONLY_RUNTIME_TABLES = ["ledger_accounts"];
 
 export async function restrictRuntimePrivileges(pool) {
   const role = await pool.query("SELECT 1 FROM pg_roles WHERE rolname='nexa_app'");
   if (!role.rows[0]) return false;
   await pool.query(`REVOKE UPDATE, DELETE ON TABLE ${IMMUTABLE_RUNTIME_TABLES.join(", ")} FROM nexa_app`);
+  await pool.query(`REVOKE DELETE ON TABLE ${LOCK_ONLY_RUNTIME_TABLES.join(", ")} FROM nexa_app`);
   return true;
 }
 
@@ -16,8 +18,11 @@ export async function assertRestrictedRuntimePrivileges(pool, env = process.env)
               SELECT 1 FROM unnest($1::text[]) AS protected(table_name)
               WHERE has_table_privilege(current_user, protected.table_name, 'UPDATE')
                  OR has_table_privilege(current_user, protected.table_name, 'DELETE')
+            ) OR EXISTS (
+              SELECT 1 FROM unnest($2::text[]) AS lock_only(table_name)
+              WHERE has_table_privilege(current_user, lock_only.table_name, 'DELETE')
             ) AS "canRewriteProtectedTables"`,
-    [IMMUTABLE_RUNTIME_TABLES],
+    [IMMUTABLE_RUNTIME_TABLES, LOCK_ONLY_RUNTIME_TABLES],
   );
   const permissions = result.rows[0];
   if (permissions?.role !== "nexa_app") throw new Error("Production API must connect to PostgreSQL as the restricted nexa_app role.");
