@@ -11,9 +11,12 @@ test("staging role synchronization supports preserved databases with legacy owne
   assert.match(script, /probe\.status === 0/);
   assert.match(script, /CREATE ROLE nexa_app LOGIN PASSWORD/);
   assert.match(script, /CREATE ROLE nexa_migrator LOGIN PASSWORD/);
+  assert.match(script, /ALTER DATABASE exchange_demo RENAME TO exchange/);
+  assert.match(script, /CREATE DATABASE exchange OWNER nexa_migrator/);
   assert.match(script, /ALTER ROLE nexa_app PASSWORD/);
   assert.match(script, /ALTER ROLE nexa_migrator PASSWORD/);
   assert.match(script, /REASSIGN OWNED BY/);
-  assert.match(script, /"-d", "exchange"/);
+  assert.match(script, /runSql\("postgres", globalSql\)/);
+  assert.match(script, /runSql\("exchange", databaseSql\)/);
   assert.doesNotMatch(script, /console\.log\([^\n]*(appPassword|migrationPassword)/);
 });
