@@ -1,5 +1,6 @@
 import { ensureLedgerSchema } from "./ledger.mjs";
 import { ensureMarketSchema } from "./matching.mjs";
+import { ensureAdvancedOrdersSchema } from "./advanced-orders.mjs";
 import { migrateSessionRotation } from "./migrations/001-session-rotation.mjs";
 import { migrateAuthenticatorSecrets } from "./secret-encryption.mjs";
 
@@ -26,6 +27,7 @@ export async function initializeApplicationSchema(pool, encryptionKey) { const e
   const migratedAuthenticatorSecrets = await migrateAuthenticatorSecrets(pool, encryptionKey);
   if (migratedAuthenticatorSecrets) console.info(JSON.stringify({ event: "authenticator_secrets_encrypted", count: migratedAuthenticatorSecrets }));
   await ensureMarketSchema(pool);
+  await ensureAdvancedOrdersSchema(pool);
   await pool.query("CREATE TABLE IF NOT EXISTS sessions (id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT UNIQUE NOT NULL, expires_at TIMESTAMPTZ NOT NULL, revoked_at TIMESTAMPTZ, created_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE INDEX IF NOT EXISTS sessions_active_idx ON sessions (token_hash, expires_at) WHERE revoked_at IS NULL;");
   await pool.query("ALTER TABLE sessions ADD COLUMN IF NOT EXISTS ip_address TEXT; ALTER TABLE sessions ADD COLUMN IF NOT EXISTS user_agent TEXT; ALTER TABLE sessions ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(); CREATE TABLE IF NOT EXISTS recovery_codes (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,code_hash TEXT NOT NULL,used_at TIMESTAMPTZ,created_at TIMESTAMPTZ NOT NULL DEFAULT now()); CREATE TABLE IF NOT EXISTS login_history (id UUID PRIMARY KEY,user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,succeeded BOOLEAN NOT NULL,ip_address TEXT,user_agent TEXT,created_at TIMESTAMPTZ NOT NULL DEFAULT now());");
   await migrateSessionRotation(pool);
