@@ -29,3 +29,9 @@ test("advanced-order initialization is not skipped when ordinary orders exist", 
   assert.match(queries[0], /CREATE TABLE IF NOT EXISTS trailing_stop_history/);
   assert.match(queries[0], /CREATE TABLE IF NOT EXISTS order_chains/);
 });
+
+test("existing databases run the advanced-order schema before initialization returns", async () => {
+  const source = await readFile(new URL("../server/initialize-schema.mjs", import.meta.url), "utf8");
+  const existingDatabasePath = source.match(/if \(exists\.rows\.length\) \{([\s\S]*?)return;/)?.[1] ?? "";
+  assert.match(existingDatabasePath, /await ensureAdvancedOrdersSchema\(pool\);/);
+});

@@ -22,7 +22,12 @@ export async function ensureAuthenticationIndexes(pool) {
   `);
 }
 
-export async function initializeApplicationSchema(pool, encryptionKey) { const exists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'sessions' OR table_name = 'users'"); if (exists.rows.length) return;
+export async function initializeApplicationSchema(pool, encryptionKey) {
+  const exists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'sessions' OR table_name = 'users'");
+  if (exists.rows.length) {
+    await ensureAdvancedOrdersSchema(pool);
+    return;
+  }
   await ensureLedgerSchema(pool);
   const migratedAuthenticatorSecrets = await migrateAuthenticatorSecrets(pool, encryptionKey);
   if (migratedAuthenticatorSecrets) console.info(JSON.stringify({ event: "authenticator_secrets_encrypted", count: migratedAuthenticatorSecrets }));
