@@ -1,11 +1,26 @@
 node_modules/
 .next/
 .env
-.env.local
+.env.*
 !.env.example
+!.env.*.example
 coverage/
 backups/
 .local-secrets/
 *.log
 
-.env.staging
+# Private keys and credential exports
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.json
+service-account*.json
+
+# Database snapshots and generated backups (migration SQL remains tracked)
+*.dump
+*.backup
+*.bak
+*.sqlite
+*.sqlite3
+*.sql.gz
