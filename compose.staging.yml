@@ -71,7 +71,7 @@ services:
     depends_on:
       - app
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://app:3001/api/health"]
+      test: ["CMD", "wget", "--header=X-Forwarded-Proto: https", "--no-verbose", "--tries=1", "--spider", "http://app:3001/api/health"]
       interval: 15s
       timeout: 5s
       retries: 10
