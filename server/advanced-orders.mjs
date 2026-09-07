@@ -15,7 +15,7 @@ import crypto from "node:crypto";
 import * as D from "./decimal.mjs";
 import { MARKET_ID, OrderError, placeOrder } from "./matching.mjs";
 
-export async function ensureAdvancedOrdersSchema(pool) { const exists = await pool.query("SELECT 1 FROM information_schema.tables WHERE table_name = 'advanced_orders' OR table_name = 'orders'"); if (exists.rows.length) return;
+export async function ensureAdvancedOrdersSchema(pool) {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS advanced_orders (
       id UUID PRIMARY KEY,
