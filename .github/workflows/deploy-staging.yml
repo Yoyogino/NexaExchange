@@ -169,6 +169,17 @@ jobs:
                 docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml up -d --no-deps --force-recreate app
               fi
               restore_legacy_containers
+              # Verify recovery without reporting the failed deployment as successful.
+              rollback_attempt=0
+              until docker exec ubuntu-app-1 wget --timeout=5 --header="X-Forwarded-Proto: https" --no-verbose --tries=1 --spider http://127.0.0.1:3001/api/ready; do
+                rollback_attempt=$((rollback_attempt + 1))
+                if [ "$rollback_attempt" -ge 30 ]; then
+                  echo "::error::Application recovery did not become ready; operator intervention required."
+                  exit 1
+                fi
+                sleep 2
+              done
+              echo "Application recovery readiness confirmed; deployment remains failed."
               exit 1
             fi
             sleep 2
