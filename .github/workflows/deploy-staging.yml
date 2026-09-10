@@ -117,7 +117,22 @@ jobs:
           previous_app_tag=""
           if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
             previous_app_image="$(docker inspect --format '{{.Image}}' ubuntu-app-1)"
-            previous_app_tag="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.image"}}' ubuntu-app-1)"
+            previous_app_tag="$(docker inspect --format '{{.Config.Image}}' ubuntu-app-1)"
+            if ! docker image inspect "$previous_app_image" >/dev/null 2>&1; then
+              running_manifest="$(docker inspect --format '{{if .ImageManifestDescriptor}}{{.ImageManifestDescriptor.Digest}}{{end}}' ubuntu-app-1 2>/dev/null || true)"
+              running_platform="$(docker inspect --format '{{if .ImageManifestDescriptor}}{{.ImageManifestDescriptor.Platform.OS}}/{{.ImageManifestDescriptor.Platform.Architecture}}{{end}}' ubuntu-app-1 2>/dev/null || true)"
+              tagged_manifest=""
+              if [ -n "$running_manifest" ] && [ -n "$running_platform" ]; then
+                tagged_manifest="$(docker image inspect --platform "$running_platform" "$previous_app_tag" --format '{{.Id}}' 2>/dev/null || true)"
+              fi
+              if [ -n "$running_manifest" ] && [ "$tagged_manifest" = "$running_manifest" ]; then
+                previous_app_image="$(docker image inspect "$previous_app_tag" --format '{{.Id}}')"
+              else
+                echo "Previous application image is unavailable; refusing deployment without a rollback image."
+                restore_legacy_containers
+                exit 1
+              fi
+            fi
           fi
 
           docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml build app migrate
