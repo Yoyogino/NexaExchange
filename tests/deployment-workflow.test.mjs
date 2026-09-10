@@ -16,16 +16,31 @@ test("rollback restores the previous image under the name used by Compose", () =
 docker() {
   if [ "$1" = inspect ]; then
     case "$*" in
+      *'ImageManifestDescriptor.Platform'*) printf '%s\\n' 'linux/amd64' ;;
+      *'ImageManifestDescriptor.Digest'*) printf '%s\\n' 'sha256:running-manifest' ;;
       *'.Config.Image'*) printf '%s\\n' 'ubuntu-app' ;;
       *'com.docker.compose.image'*) printf '%s\\n' 'sha256:old-image' ;;
       *'.Image'*) printf '%s\\n' 'sha256:old-image' ;;
     esac
   elif [ "$1" = tag ]; then
-    test "$2" = 'sha256:old-image'
+    if [ "\${MOCK_IMAGE_MISSING:-0}" = 0 ]; then
+      test "$2" = 'sha256:old-image'
+    else
+      test "$2" = 'sha256:verified-index'
+    fi
     test "$3" = 'ubuntu-app'
     printf '%s\\n' 'previous-image-restored'
   elif [ "$1" = image ] && [ "$2" = inspect ]; then
-    test "\${MOCK_IMAGE_MISSING:-0}" = 0
+    case "$*" in
+      *'--platform'*)
+        if [ "\${MOCK_MANIFEST_MATCH:-0}" = 1 ]; then
+          printf '%s\\n' 'sha256:running-manifest'
+        else
+          printf '%s\\n' 'sha256:other-manifest'
+        fi ;;
+      *'ubuntu-app'*) printf '%s\\n' 'sha256:verified-index' ;;
+      *) test "\${MOCK_IMAGE_MISSING:-0}" = 0 ;;
+    esac
   else
     return 1
   fi
@@ -36,6 +51,10 @@ ${retag}
 `;
   const shell = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
   assert.equal(execFileSync(shell, ["--noprofile", "--norc"], { input: script, encoding: "utf8" }).trim(), "previous-image-restored");
+  assert.equal(execFileSync(shell, ["--noprofile", "--norc"], {
+    input: script, encoding: "utf8",
+    env: { ...process.env, MOCK_IMAGE_MISSING: "1", MOCK_MANIFEST_MATCH: "1" },
+  }).trim(), "previous-image-restored");
   assert.throws(
     () => execFileSync(shell, ["--noprofile", "--norc"], {
       input: script, encoding: "utf8", env: { ...process.env, MOCK_IMAGE_MISSING: "1" },
