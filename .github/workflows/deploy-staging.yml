@@ -117,7 +117,7 @@ jobs:
           previous_app_tag=""
           if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
             previous_app_image="$(docker inspect --format '{{.Image}}' ubuntu-app-1)"
-            previous_app_tag="$(docker inspect --format '{{index .Config.Labels "com.docker.compose.image"}}' ubuntu-app-1)"
+            previous_app_tag="$(docker inspect --format '{{.Config.Image}}' ubuntu-app-1)"
           fi
 
           docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml build app migrate

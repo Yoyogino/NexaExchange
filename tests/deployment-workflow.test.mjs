@@ -1,8 +1,39 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { execFileSync } from "node:child_process";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-staging.yml", import.meta.url), "utf8");
+
+test("rollback restores the previous image under the name used by Compose", () => {
+  const captureStart = workflow.indexOf('          previous_app_image=""');
+  const captureEnd = workflow.indexOf("          docker compose", captureStart);
+  assert.ok(captureStart >= 0 && captureEnd > captureStart);
+  const capture = workflow.slice(captureStart, captureEnd);
+  const retag = workflow.split(/\r?\n/).find((line) => line.trim().startsWith('docker tag "$previous_app_image"'));
+  assert.ok(retag);
+  const script = `set -eu
+docker() {
+  if [ "$1" = inspect ]; then
+    case "$*" in
+      *'.Config.Image'*) printf '%s\\n' 'ubuntu-app' ;;
+      *'com.docker.compose.image'*) printf '%s\\n' 'sha256:old-image' ;;
+      *'.Image'*) printf '%s\\n' 'sha256:old-image' ;;
+    esac
+  elif [ "$1" = tag ]; then
+    test "$2" = 'sha256:old-image'
+    test "$3" = 'ubuntu-app'
+    printf '%s\\n' 'previous-image-restored'
+  else
+    return 1
+  fi
+}
+${capture}
+${retag}
+`;
+  const shell = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
+  assert.equal(execFileSync(shell, ["--noprofile", "--norc"], { input: script, encoding: "utf8" }).trim(), "previous-image-restored");
+});
 
 test("staging deployment is manual, verified, serialized, and environment-protected", () => {
   assert.match(workflow, /workflow_dispatch:/);
