@@ -24,15 +24,26 @@ docker() {
     test "$2" = 'sha256:old-image'
     test "$3" = 'ubuntu-app'
     printf '%s\\n' 'previous-image-restored'
+  elif [ "$1" = image ] && [ "$2" = inspect ]; then
+    test "\${MOCK_IMAGE_MISSING:-0}" = 0
   else
     return 1
   fi
 }
+restore_legacy_containers() { :; }
 ${capture}
 ${retag}
 `;
   const shell = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
   assert.equal(execFileSync(shell, ["--noprofile", "--norc"], { input: script, encoding: "utf8" }).trim(), "previous-image-restored");
+  assert.throws(
+    () => execFileSync(shell, ["--noprofile", "--norc"], {
+      input: script, encoding: "utf8", env: { ...process.env, MOCK_IMAGE_MISSING: "1" },
+    }),
+    (error) => error.status === 1
+      && error.stdout.includes("refusing deployment without a rollback image")
+      && !error.stdout.includes("previous-image-restored"),
+  );
 });
 
 test("staging deployment is manual, verified, serialized, and environment-protected", () => {

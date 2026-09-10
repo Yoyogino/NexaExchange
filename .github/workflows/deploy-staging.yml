@@ -118,6 +118,11 @@ jobs:
           if docker inspect ubuntu-app-1 >/dev/null 2>&1; then
             previous_app_image="$(docker inspect --format '{{.Image}}' ubuntu-app-1)"
             previous_app_tag="$(docker inspect --format '{{.Config.Image}}' ubuntu-app-1)"
+            if ! docker image inspect "$previous_app_image" >/dev/null 2>&1; then
+              echo "Previous application image is unavailable; refusing deployment without a rollback image."
+              restore_legacy_containers
+              exit 1
+            fi
           fi
 
           docker compose --project-name ubuntu --env-file .env.compose -f compose.staging.yml build app migrate
