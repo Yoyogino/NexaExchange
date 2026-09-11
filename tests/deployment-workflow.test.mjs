@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 
 const workflow = await readFile(new URL("../.github/workflows/deploy-staging.yml", import.meta.url), "utf8");
 
@@ -63,6 +63,43 @@ ${retag}
       && error.stdout.includes("refusing deployment without a rollback image")
       && !error.stdout.includes("previous-image-restored"),
   );
+});
+
+test("rollback verifies delayed readiness and reports persistent recovery failure", () => {
+  const start = workflow.indexOf('              if [ -n "$previous_app_image"');
+  const end = workflow.indexOf("            fi", workflow.indexOf('echo "Application recovery readiness confirmed;', start));
+  assert.ok(start >= 0 && end > start);
+  const recovery = workflow.slice(start, end);
+  const shell = process.platform === "win32" ? "C:/Program Files/Git/bin/bash.exe" : "bash";
+  for (const readyAfter of [3, 99]) {
+    const result = spawnSync(shell, ["--noprofile", "--norc"], {
+      encoding: "utf8",
+      input: `set -eu
+previous_app_image=old
+previous_app_tag=app
+attempts=0
+docker() {
+  case "$1" in
+    tag) echo retagged ;;
+    compose) echo recreated ;;
+    exec) attempts=$((attempts + 1)); echo "probe-$attempts"; test "$attempts" -ge ${readyAfter} ;;
+    *) return 2 ;;
+  esac
+}
+restore_legacy_containers() { echo legacy-restored; }
+sleep() { :; }
+${recovery}`,
+    });
+    assert.equal(result.status, 1, "deployment must remain failed even after recovery");
+    assert.match(result.stdout, /retagged\nrecreated\nlegacy-restored\nprobe-1/);
+    if (readyAfter === 3) {
+      assert.match(result.stdout, /probe-3\nApplication recovery readiness confirmed/);
+      assert.doesNotMatch(result.stdout, /operator intervention|probe-4/);
+    } else {
+      assert.match(result.stdout, /probe-30\n::error::Application recovery did not become ready/);
+      assert.doesNotMatch(result.stdout, /readiness confirmed|probe-31/);
+    }
+  }
 });
 
 test("staging deployment is manual, verified, serialized, and environment-protected", () => {
