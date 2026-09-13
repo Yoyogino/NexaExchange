@@ -1,0 +1,23 @@
+name: Isolated Docker deployment recovery drill
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - scripts/isolated-deployment-drill.mjs
+      - .github/workflows/isolated-deployment-drill.yml
+permissions:
+  contents: read
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Exercise deployment shell with real isolated containers
+        run: node scripts/isolated-deployment-drill.mjs
+      - name: Record non-secret recovery results
+        if: success()
+        run: cat drill-result.json >> "$GITHUB_STEP_SUMMARY"
