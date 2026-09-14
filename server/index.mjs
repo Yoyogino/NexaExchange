@@ -22,7 +22,7 @@ import * as V from "./validation.mjs";
 import { createRateLimit } from "./rate-limit.mjs";
 import { createMetrics } from "./metrics.mjs";
 import { decryptSecret, encryptSecret, loadEncryptionKey } from "./secret-encryption.mjs";
-import { createMailer } from "./mailer.mjs";
+import { createMailer, EmailDeliveryError } from "./mailer.mjs";
 import { apiNoStore, assertProxyConfiguration, requireHttps, securityHeaders } from "./http-security.mjs";
 import { SESSION_IDLE_MINUTES, SESSION_TOUCH_INTERVAL_MINUTES, sessionTokenFromRequest, shouldTouchSession } from "./session-policy.mjs";
 import { assertMonitoringConfiguration, createMonitoringHandler } from "./monitoring.mjs";
@@ -263,7 +263,14 @@ app.post("/api/auth/password-reset/request", rateLimit({ windowMs: 60_000, limit
     await issuePasswordResetToken(client, { userId: user.rows[0].id, codeHash: codeHash(code) });
     await client.query("COMMIT");
     client.release(); client = null;
-    const delivery = await mailer.sendPasswordResetCode(email, code);
+    let delivery;
+    try {
+      delivery = await mailer.sendPasswordResetCode(email, code);
+    } catch (error) {
+      if (!(error instanceof EmailDeliveryError)) throw error;
+      // Preserve the unknown-account response; the mailer logged a sanitized failure.
+      delivery = { delivery: "email" };
+    }
     res.json({ message: "If the account exists, reset instructions were sent.", ...delivery, ...(delivery.delivery === "local-demo" ? { demoCode: code } : {}), expiresInMinutes: 15 });
   } catch (error) { if (client) { await client.query("ROLLBACK"); client.release(); } next(error); }
 });
