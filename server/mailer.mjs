@@ -3,6 +3,13 @@ import crypto from "node:crypto";
 
 const isProduction = process.env.NODE_ENV === "production";
 
+export class EmailDeliveryError extends Error {
+  constructor() {
+    super("Email delivery failed.");
+    this.name = "EmailDeliveryError";
+  }
+}
+
 export function createMailer({
   apiUrl = process.env.EMAIL_API_URL,
   apiKey = process.env.EMAIL_API_KEY,
@@ -37,8 +44,8 @@ export function createMailer({
       return { delivery: result.delivery || "email" };
     } catch (error) {
       const recipientHash = crypto.createHash("sha256").update(String(to).trim().toLowerCase()).digest("hex").slice(0, 16);
-      console.error(JSON.stringify({ event: "email_delivery_failed", recipientHash, template: subject.startsWith("Verify") ? "verification" : "password_reset", errorType: error?.name ?? "Error" }));
-      if (isProduction) throw error;
+      console.error(JSON.stringify({ event: "email_delivery_failed", recipientHash, template: subject.startsWith("Verify") ? "verification" : "password_reset", errorType: "EmailDeliveryError" }));
+      if (isProduction) throw new EmailDeliveryError();
       return { delivery: "local-demo" };
     }
   }
